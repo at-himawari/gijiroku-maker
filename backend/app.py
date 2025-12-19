@@ -11,8 +11,8 @@ import io
 import wave
 import time
 from pydantic import BaseModel
-from google.cloud.speech_v1p1beta1.services.speech import SpeechAsyncClient
-from google.cloud.speech_v1p1beta1 import types
+from google.cloud.speech_v2.services.speech import SpeechAsyncClient
+from google.cloud.speech_v2 import types
 from starlette.websockets import WebSocketState
 from dotenv import load_dotenv
 
@@ -25,13 +25,14 @@ load_dotenv()
 
 # Google Cloud の認証情報のパスを環境変数から取得
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+GOOGLE_PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID")
+GOOGLE_REGION="asia-northeast1"
 
 audio_buffer = bytearray()
 
 # CORS設定
 origins = [
     "http://localhost:3000",
-    # 他の許可するオリジンを追加
 ]
 
 app.add_middleware(
@@ -42,13 +43,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Azure OpenAIの設定を環境変数から取得
-whisper_client = AzureOpenAI(
-    azure_endpoint=os.getenv("AZURE_WHISPER_ENDPOINT"),
-    api_version="2024-06-01",
-    api_key=os.getenv("AZURE_API_KEY")
-)
-
+# Geminiに修正
 gpt_client = AzureOpenAI(
     azure_endpoint=os.getenv("AZURE_GPT_ENDPOINT"),
     api_version="2024-02-15-preview",
@@ -56,8 +51,9 @@ gpt_client = AzureOpenAI(
 )
 
 # Google Speech-to-Text 非同期クライアントの初期化
-speech_client = SpeechAsyncClient()
-
+speech_client = SpeechAsyncClient(
+    client_options={"api_endpoint": f"{GOOGLE_REGION}-speech.googleapis.com"}
+)
 # ログの設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -108,20 +104,39 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         # Speech-to-Text の設定
-        config = types.RecognitionConfig(
-            encoding=types.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=16000,
-            language_code="ja-JP",
+        # 1. 認識の設定
+        recognition_config = types.RecognitionConfig(
+            explicit_decoding_config=types.ExplicitDecodingConfig(
+                encoding=types.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
+                sample_rate_hertz=16000,
+                audio_channel_count=1,
+            ),
+            language_codes=["ja-JP"],
+            model="long", # V2の汎用モデル (latest_long なども可)
         )
+        # 2. ストリーミング機能の設定 (中間結果など)
+        streaming_features = types.StreamingRecognitionFeatures(
+            interim_results=True
+        )
+
+        # 3. ストリーミング設定全体
         streaming_config = types.StreamingRecognitionConfig(
-            config=config,
-            interim_results=True,
+            config=recognition_config,
+            streaming_features=streaming_features
         )
+
+        # 4. Recognizerのリソースパス
+        # ここではデフォルト設定("_")を使用。必要に応じて作成したRecognizer IDを指定
+        recognizer_resource = f"projects/{GOOGLE_PROJECT_ID}/locations/{GOOGLE_REGION}/recognizers/_"
 
         # 非同期ジェネレータ関数
         async def request_generator():
             nonlocal last_send_time
-            yield types.StreamingRecognizeRequest(streaming_config=streaming_config)
+            yield types.StreamingRecognizeRequest(
+                    recognizer=recognizer_resource,
+                    streaming_config=streaming_config
+                )
+
             try:
                 while True:
                     try:
@@ -131,7 +146,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         # 必要に応じて無音データを送信
                         silent_data = b'\x00' * 3200  # 0.1秒分の無音データ（16kHz, 16bit）
                         audio_buffer.extend(silent_data)
-                        yield types.StreamingRecognizeRequest(audio_content=silent_data)
+                        yield types.StreamingRecognizeRequest(audio=silent_data)
                         continue
 
                     logger.debug(f"Received audio data of size: {len(data)} bytes")
@@ -140,41 +155,43 @@ async def websocket_endpoint(websocket: WebSocket):
                     audio_buffer.extend(data)
 
                     # Google Speech-to-Textにストリーミングリクエストを送信
-                    yield types.StreamingRecognizeRequest(audio_content=data)
+                    yield types.StreamingRecognizeRequest(audio=data)
 
-                    # Whisper用のバッファデータが一定時間以上たまったら処理
-                    current_time = time.time()
-                    if current_time - last_send_time >= BUFFER_TIME_SECONDS:
-                        asyncio.create_task(handle_whisper_transcription(websocket))
-                        last_send_time = current_time
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected during data reception.")
             except Exception as e:
                 logger.error(f"Error receiving data: {e}")
                 raise e
+        try:
+            responses = await speech_client.streaming_recognize(requests=request_generator())
 
-        # Whisperのバッチ処理関数
-        async def handle_whisper_transcription(websocket: WebSocket):
-            if not audio_buffer:
-                return
-            transcription = await transcribe_audio(bytes(audio_buffer))
-            await manager.send_personal_message({"type": "transcription", "text": transcription}, websocket)
-            audio_buffer.clear()
+            async for response in responses:
+                if not response.results:
+                    continue
 
-        # ストリーミング認識の実行（非同期ジェネレータを使用）
-        responses = await speech_client.streaming_recognize(requests=request_generator())
+                for result in response.results:
+                    if not result.alternatives:
+                        continue
 
-        async for response in responses:
-            for result in response.results:
-                if result.is_final:
-                    # pass
                     transcript = result.alternatives[0].transcript
-                    logger.info(f"Final transcript: {transcript}")
-                    await manager.send_personal_message({"type": "google_transcription", "text": transcript}, websocket)
-                else:
-                    interim = result.alternatives[0].transcript
-                    logger.info(f"Interim transcript: {interim}")
-                    await manager.send_personal_message({"type": "immediate", "text": interim}, websocket)
+
+                    if result.is_final:
+                        logger.info(f"Final transcript: {transcript}")
+                        await manager.send_personal_message({"type": "transcription", "text": transcript}, websocket)
+                    else:
+                        logger.info(f"Interim transcript: {transcript}")
+                        await manager.send_personal_message({"type": "immediate", "text": transcript}, websocket)
+        
+        except asyncio.CancelledError:
+            # タスクがキャンセルされた場合（ブラウザ切断時など）
+            logger.info("Stream processing cancelled (Client disconnected).")
+            # ここでは何もしなくて良い（ループを抜けるだけでOK）
+            
+        except Exception as e:
+            # その他のAPIエラーなど
+            logger.error(f"Error in speech recognition loop: {e}")
+            await manager.send_personal_message({"type": "error", "message": str(e)}, websocket)
+
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
@@ -192,13 +209,6 @@ async def transcribe_audio(audio_data: bytes) -> str:
         wav_file = pcm_to_wav(audio_data, sample_rate, channels)
         wav_file.name = "audio.wav"
 
-        # Whisper APIを呼び出す
-        response = whisper_client.audio.transcriptions.create(
-            model="whisper-1",
-            file=wav_file,
-            language="ja",
-            prompt="あなたは、議事録担当です。誰が話したかを（）で示しながら文字起こしをしてください。不明の場合は、不明と明記してください。"
-        )
         return response.text
     except Exception as e:
         logger.error(f"Error in transcribe_audio: {e}")
