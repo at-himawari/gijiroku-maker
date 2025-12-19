@@ -3,7 +3,7 @@ import os
 import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from openai import AzureOpenAI
+import google.generativeai as genai
 import json
 import logging
 from typing import List, Dict, Any
@@ -28,6 +28,26 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CRE
 GOOGLE_PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID")
 GOOGLE_REGION="asia-northeast1"
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+genai.configure(api_key=GEMINI_API_KEY)
+
+SYSTEM_INSTRUCTION = """
+    あなたは企業の議事録作成担当者です。与えられたフォーマットに従って議事録を作成してください。
+    不明な部分は曖昧に回答せず、｢不明｣と明言してください。
+"""
+
+generation_config = {
+    "temperature": 0,
+    "top_p": 0.1,
+    "max_output_tokens": 8192,
+}
+
+gemini_model = genai.GenerativeModel(
+    model_name="gemini-2.5-flash", # または "gemini-1.5-flash"
+    generation_config=generation_config,
+    system_instruction=SYSTEM_INSTRUCTION
+)
+
 audio_buffer = bytearray()
 
 # CORS設定
@@ -43,17 +63,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Geminiに修正
-gpt_client = AzureOpenAI(
-    azure_endpoint=os.getenv("AZURE_GPT_ENDPOINT"),
-    api_version="2024-02-15-preview",
-    api_key=os.getenv("AZURE_API_KEY")
-)
+
 
 # Google Speech-to-Text 非同期クライアントの初期化
 speech_client = SpeechAsyncClient(
     client_options={"api_endpoint": f"{GOOGLE_REGION}-speech.googleapis.com"}
 )
+
 # ログの設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -217,11 +233,9 @@ async def transcribe_audio(audio_data: bytes) -> str:
 # TranscriptRequest モデル
 class TranscriptRequest(BaseModel):
     transcript: str
-
-# 議事録生成関数
+# 議事録生成関数 (Gemini版)
 async def generate_minutes(transcript: str):
-    prompt = f"以下は会議の文字起こしです。これを基に議事録を作成してください：\n\n{transcript}"
-    format = """ 以下のフォーマットに従って議事録を作成してください。わからない部分は、曖昧に回答せず、不明と記述するようにしてください。
+    format_text = """ 以下のフォーマットに従って議事録を作成してください。わからない部分は、曖昧に回答せず、不明と記述するようにしてください。
                 # 議題
                 議題を簡潔に入力します。
                 # 参加者
@@ -233,19 +247,17 @@ async def generate_minutes(transcript: str):
                 # 議事内容
                 議事詳細を入力します。誰が発言したかを（）内に示してください。不明な場合は、不明と明記してください。
             """
+    
+    # プロンプトの組み立て
+    # システムプロンプトはモデル初期化時に設定済みです
+    prompt = f"{format_text}\n\n以下は会議の文字起こしです。これを基に議事録を作成してください：\n\n{transcript}"
+
     try:
-        response = gpt_client.chat.completions.create(
-            model=None,
-            messages=[
-                {"role": "system", "content": "あなたは金融業界のITシステムに関する議事録作成者です。"},
-                {"role": "assistant", "content": format},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            top_p=0.8,
-            presence_penalty=0.1
-        )
-        return response.choices[0].message.content
+        # 非同期でGemini APIを呼び出し
+        response = await gemini_model.generate_content_async(prompt)
+        
+        # テキスト部分を取得
+        return response.text
     except Exception as e:
         logger.error(f"Error generating minutes: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="議事録の生成中にエラーが発生しました。")
