@@ -2,34 +2,93 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MicIcon, SquareIcon, DownloadIcon } from "lucide-react";
+import { MicIcon, SquareIcon, DownloadIcon, LogOutIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import Image from "next/image"; // 追記
+import { useAuth } from "@/contexts/AuthContext";
+import { fetchAuthSession } from "aws-amplify/auth";
+import Image from "next/image";
 
 const SAMPLE_RATE = 16000;
-const WS_URL = `ws://${process.env.NEXT_PUBLIC_HOST}/ws`;
+// NEXT_PUBLIC_WS_BASE_URL があればそれを使用、なければ NEXT_PUBLIC_HOST から構築
+const WS_URL =
+  process.env.NEXT_PUBLIC_WS_BASE_URL ||
+  `ws://${process.env.NEXT_PUBLIC_HOST}/ws`;
+// APIのベースURL
+const API_BASE_URL = `http://${process.env.NEXT_PUBLIC_HOST}`;
+
+// グローバルなWebSocket管理（Reactの再レンダリングに影響されない）
+let globalWebSocket: WebSocket | null = null;
+let isExplicitlyClosing = false;
 
 export default function TranscriptionApp() {
   const [isRecording, setIsRecording] = useState(false);
   const [minutes, setMinutes] = useState<string>("");
-  const websocketRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const [allTranscript, setAllTranscript] = useState<string>("");
   const [immediate, setImmediate] = useState<string>("");
+  const [connectionStatus, setConnectionStatus] = useState<
+    "disconnected" | "connecting" | "connected" | "error"
+  >("disconnected");
   const { toast } = useToast();
+  const { logout, token, user } = useAuth();
 
   const connectWebSocket = useCallback(() => {
-    if (websocketRef.current?.readyState === WebSocket.OPEN) return;
+    // 既に接続中または接続試行中の場合は何もしない
+    if (globalWebSocket) {
+      if (globalWebSocket.readyState === WebSocket.OPEN || 
+          globalWebSocket.readyState === WebSocket.CONNECTING) {
+        return;
+      }
+    }
 
-    websocketRef.current = new WebSocket(WS_URL);
+    if (!token) return;
 
-    websocketRef.current.onopen = () => {};
+    setConnectionStatus("connecting");
+    isExplicitlyClosing = false;
 
-    websocketRef.current.onmessage = (event) => {
+    const wsUrl = WS_URL;
+    console.log("WebSocket接続を開始します:", wsUrl);
+    globalWebSocket = new WebSocket(wsUrl);
+
+    globalWebSocket.onopen = async () => {
+      console.log("WebSocket接続が確立されました:", wsUrl);
       try {
+        // 常に最新のセッションからトークンを取得し直す
+        const session = await fetchAuthSession();
+        const latestToken = session.tokens?.accessToken?.toString();
+        
+        if (globalWebSocket && latestToken) {
+          console.log("最新のトークンで認証メッセージを送信します");
+          globalWebSocket.send(JSON.stringify({
+            type: 'auth',
+            token: latestToken
+          }));
+        }
+      } catch (err) {
+        console.error("トークン取得エラー:", err);
+      }
+      setConnectionStatus("connected");
+    };
+
+    globalWebSocket.onmessage = (event) => {
+      try {
+        console.log("WebSocketメッセージ受信:", event.data);
         const data = JSON.parse(event.data);
+        
+        // 認証失敗（トークン切れなど）の場合の処理
+        if (data.type === "error" && data.message === "認証失敗") {
+          toast({
+            title: "認証エラー",
+            description: "WebSocket認証に失敗しました。詳細をコンソールで確認してください。",
+            variant: "destructive",
+          });
+          console.error("WebSocket認証失敗:", data.message);
+          // デバッグのため強制ログアウトを一時停止
+          // setTimeout(() => logout(), 2000);
+          return;
+        }
 
         if (data.type === "transcription") {
           setAllTranscript((prev) => `${prev} ${data.text}`);
@@ -45,62 +104,103 @@ export default function TranscriptionApp() {
           });
         }
       } catch (error) {
-        console.error(error);
+        console.error("WebSocketメッセージ解析エラー:", error);
       }
     };
 
-    websocketRef.current.onerror = () => {
-      toast({
-        title: "エラー",
-        description: "WebSocket接続でエラーが発生しました。",
-        variant: "destructive",
-      });
-    };
-
-    websocketRef.current.onclose = () => {
-      if (isRecording) {
-        setTimeout(connectWebSocket, 3000);
+    globalWebSocket.onerror = (error) => {
+      if (!isExplicitlyClosing) {
+        console.error("WebSocketエラー詳細:", error);
+        setConnectionStatus("error");
       }
     };
-  }, [isRecording, toast]);
+
+    globalWebSocket.onclose = (event) => {
+      if (isExplicitlyClosing) {
+        console.log("WebSocketは意図的に閉じられました");
+      } else {
+        console.log("WebSocket接続が閉じられました:", event.code, event.reason);
+        setConnectionStatus("disconnected");
+        
+        // 認証エラーによる切断（4001など）の場合の処理
+        if (event.code === 4001) {
+          toast({
+            title: "認証エラー",
+            description: "WebSocket接続が認証エラーで切断されました。",
+            variant: "destructive",
+          });
+          console.error("WebSocket切断(4001): 認証エラー");
+          // デバッグのため強制ログアウトを一時停止
+          // logout();
+          return;
+        }
+
+        // 録音中かつ予期せぬ切断の場合は再接続を試行
+        if (event.code !== 1000 && event.code !== 1001) {
+          setTimeout(connectWebSocket, 3000);
+        }
+      }
+    };
+  }, [token, toast]);
 
   useEffect(() => {
-    connectWebSocket();
-
-    return () => {
-      if (websocketRef.current) {
-        websocketRef.current.close();
+    if (token) {
+      connectWebSocket();
+    } else {
+      if (globalWebSocket) {
+        isExplicitlyClosing = true;
+        globalWebSocket.close(1000, "ログアウト");
+        globalWebSocket = null;
       }
+      setConnectionStatus("disconnected");
+    }
+
+    // アンマウント時の処理を厳密にする
+    return () => {
+      // 実際にはシングルトンなので閉じない方が安定するが、
+      // ログアウト時などは明示的に閉じる必要がある
     };
-  }, [connectWebSocket]);
+  }, [token, connectWebSocket]);
 
   const startRecording = async () => {
     try {
+      if (connectionStatus !== "connected") {
+        toast({
+          title: "接続エラー",
+          description: "サーバーに接続されていません。再接続を待ってください。",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
-      sourceRef.current =
-        audioContextRef.current.createMediaStreamSource(stream);
-      processorRef.current = audioContextRef.current.createScriptProcessor(
-        1024,
-        1,
-        1
-      );
+      sourceRef.current = audioContextRef.current.createMediaStreamSource(stream);
+      processorRef.current = audioContextRef.current.createScriptProcessor(1024, 1, 1);
 
       sourceRef.current.connect(processorRef.current);
       processorRef.current.connect(audioContextRef.current.destination);
 
       processorRef.current.onaudioprocess = (e) => {
-        if (websocketRef.current?.readyState === WebSocket.OPEN) {
+        if (globalWebSocket?.readyState === WebSocket.OPEN) {
           const inputData = e.inputBuffer.getChannelData(0);
           const audioData = convertFloat32ToInt16(inputData);
-          websocketRef.current.send(audioData);
+          // 音声データ送信ログ（大量に出るため注意）
+          if (Math.random() < 0.05) { // 5%の確率で間引いてログ出力
+            console.log("音声データ送信中... バイト数:", audioData.byteLength);
+          }
+          globalWebSocket.send(audioData);
+        } else {
+            // WebSocketが開いていない場合の警告
+            if (Math.random() < 0.01) {
+              console.warn("WebSocketがOPENでないため音声データを送信できません。readyState:", globalWebSocket?.readyState);
+            }
         }
       };
 
       setIsRecording(true);
     } catch (error) {
       console.error("Error accessing microphone:", error);
-
       toast({
         title: "エラー",
         description: "マイクへのアクセスに失敗しました。",
@@ -119,35 +219,26 @@ export default function TranscriptionApp() {
   };
 
   const generateMinutes = async () => {
+    if (!token) return;
     try {
-      const response = await fetch(
-        `http://${process.env.NEXT_PUBLIC_HOST}/generate_minutes`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            transcript: allTranscript,
-          }),
-        }
-      );
+      const response = await fetch(`${API_BASE_URL}/generate_minutes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          transcript: allTranscript,
+        }),
+      });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Minutes generation failed");
-      }
-
+      if (!response.ok) throw new Error("Minutes generation failed");
       const data = await response.json();
       setMinutes(data.minutes);
+      toast({ title: "成功", description: "議事録が生成されました。" });
     } catch (error) {
       console.error("Error generating minutes:", error);
-
-      toast({
-        title: "エラー",
-        description: "議事録の生成に失敗しました。",
-        variant: "destructive",
-      });
+      toast({ title: "エラー", description: "議事録の生成に失敗しました。", variant: "destructive" });
     }
   };
 
@@ -172,76 +263,70 @@ export default function TranscriptionApp() {
 
   return (
     <div className="container mx-auto">
-      <div className="flex border-b-2 border-yellow-400 mb-2">
-        <Image
-          className=""
-          width={30}
-          height={1}
-          style={{ width: "auto", height: "100%" }}
-          src="/logo.png"
-          alt="logo"
-        />
-        <h1 className="text-2xl font-bold">リアルタイム議事録システム</h1>
+      <div className="flex justify-between items-center border-b-2 border-yellow-400 mb-2">
+        <div className="flex items-center">
+          <Image width={30} height={30} src="/logo.png" alt="logo" />
+          <h1 className="text-2xl font-bold ml-2">リアルタイム議事録システム</h1>
+        </div>
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2">
+            <div className={`w-3 h-3 rounded-full ${
+              connectionStatus === "connected" ? "bg-green-500" : 
+              connectionStatus === "connecting" ? "bg-yellow-500 animate-pulse" : 
+              "bg-red-500"
+            }`}></div>
+            <span className="text-sm text-gray-600">
+              {connectionStatus === "connected" ? "接続済み" : 
+               connectionStatus === "connecting" ? "接続中..." : "未接続"}
+            </span>
+          </div>
+          {user && <div className="text-sm text-gray-600">{user.email} さん</div>}
+          <Button onClick={async () => {
+            isExplicitlyClosing = true;
+            if (globalWebSocket) globalWebSocket.close();
+            globalWebSocket = null;
+            if (isRecording) stopRecording();
+            logout();
+          }} variant="outline" size="sm">
+            <LogOutIcon className="w-4 h-4 mr-2" />ログアウト
+          </Button>
+        </div>
       </div>
       <div className="mb-4 space-x-2">
         {isRecording ? (
-          <Button
-            onClick={stopRecording}
-            className="bg-red-500 hover:bg-red-600 text-white"
-          >
-            <SquareIcon className="w-4 h-4 mr-2" />
-            停止
+          <Button onClick={stopRecording} className="bg-red-500 hover:bg-red-600 text-white">
+            <SquareIcon className="w-4 h-4 mr-2" />停止
           </Button>
         ) : (
-          <Button
-            onClick={startRecording}
-            className="bg-green-500 hover:bg-green-600 text-white"
-          >
-            <MicIcon className="w-4 h-4 mr-2" />
-            録音開始
+          <Button onClick={startRecording} className="bg-green-500 hover:bg-green-600 text-white" disabled={connectionStatus !== "connected"}>
+            <MicIcon className="w-4 h-4 mr-2" />録音開始
           </Button>
         )}
-        <Button
-          onClick={generateMinutes}
-          className="bg-blue-500 hover:bg-blue-600 text-white"
-          disabled={!allTranscript}
-        >
+        <Button onClick={generateMinutes} className="bg-blue-500 hover:bg-blue-600 text-white" disabled={!allTranscript}>
           議事録生成
         </Button>
         {minutes && (
-          <Button
-            onClick={downloadMinutes}
-            className="bg-purple-500 hover:bg-purple-600 text-white"
-          >
-            <DownloadIcon className="w-4 h-4 mr-2" />
-            議事録をダウンロード
+          <Button onClick={downloadMinutes} className="bg-purple-500 hover:bg-purple-600 text-white">
+            <DownloadIcon className="w-4 h-4 mr-2" />議事録をダウンロード
           </Button>
         )}
       </div>
       <div className="my-2">
         {immediate && <p className="text-slate-500">リアルタイム文字起こし</p>}
-        <h2 className="text-2xl">{immediate.slice(-30)}</h2>
+        <h2 className="text-2xl">{immediate}</h2>
       </div>
-      <div></div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="col-span-1">
-          <div className="md:flex items-end mb-2">
-            <h2 className="text-xl font-semibold mr-2">全文</h2>
-          </div>
+          <h2 className="text-xl font-semibold mb-2">全文</h2>
           <Textarea
-            value={allTranscript}
+            value={allTranscript || "ここに文字起こし結果が表示されます..."}
             readOnly
-            className="w-full h-[200px] p-2 border rounded"
+            className="w-full h-[300px] p-2 border rounded"
           />
         </div>
         <div className="col-span-1">
           <h2 className="text-xl font-semibold mb-2">生成された議事録</h2>
-          <Textarea
-            value={minutes}
-            readOnly
-            className="w-full h-[200px] p-2 border rounded"
-          />
+          <Textarea value={minutes} readOnly className="w-full h-[300px] p-2 border rounded" />
         </div>
       </div>
     </div>

@@ -1,0 +1,581 @@
+/**
+ * Task 10.1: Cognito 認証フロー統合テスト
+ *
+ * React Testing Library を使用した Cognito ログイン・登録・パスワードリセットフローのテスト
+ *
+ * 検証対象要件:
+ * - 要件 2.1, 2.2: ログインフロー
+ * - 要件 1.1: 登録フロー
+ * - 要件 9.1, 9.2, 9.3: パスワードリセットフロー
+ */
+
+import React from "react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  cleanup,
+} from "@testing-library/react";
+import { CognitoLoginForm } from "../CognitoLoginForm";
+import { CognitoRegisterForm } from "../CognitoRegisterForm";
+import { CognitoPasswordResetForm } from "../CognitoPasswordResetForm";
+
+// モックのセットアップ
+const mockCognitoSignIn = jest.fn();
+const mockCognitoSignUp = jest.fn();
+const mockCognitoConfirmSignUp = jest.fn();
+const mockCognitoResendSignUpCode = jest.fn();
+const mockCognitoResetPassword = jest.fn();
+const mockCognitoConfirmResetPassword = jest.fn();
+
+// AuthContext のモック
+jest.mock("@/contexts/AuthContext", () => ({
+  useAuth: () => ({
+    cognitoSignIn: mockCognitoSignIn,
+    cognitoSignUp: mockCognitoSignUp,
+    cognitoConfirmSignUp: mockCognitoConfirmSignUp,
+    cognitoResendSignUpCode: mockCognitoResendSignUpCode,
+    cognitoResetPassword: mockCognitoResetPassword,
+    cognitoConfirmResetPassword: mockCognitoConfirmResetPassword,
+    isAuthenticated: false,
+    user: null,
+  }),
+}));
+
+// タイマーのモック
+jest.useFakeTimers();
+
+describe("Cognito 認証フロー統合テスト", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    cleanup();
+    // タイマーをリセット
+    jest.clearAllTimers();
+  });
+
+  afterEach(() => {
+    // タイマーを実際の時間に戻す
+    jest.runOnlyPendingTimers();
+    jest.useRealTimers();
+    cleanup();
+  });
+
+  afterAll(() => {
+    // すべてのタイマーをクリア
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  describe("ログインフロー (要件 2.1, 2.2)", () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    test("正常なログインフロー", async () => {
+      mockCognitoSignIn.mockResolvedValue({
+        success: true,
+        message: "ログインに成功しました",
+      });
+
+      const onSuccess = jest.fn();
+      render(<CognitoLoginForm onSuccess={onSuccess} />);
+
+      // メールアドレスとパスワードを入力
+      const emailInput = screen.getByTestId("email-input");
+      const passwordInput = screen.getByTestId("password-input");
+      const submitButton = screen.getByTestId("login-submit");
+
+      fireEvent.change(emailInput, { target: { value: "test@example.com" } });
+      fireEvent.change(passwordInput, { target: { value: "Password123!" } });
+
+      // フォーム送信
+      fireEvent.click(submitButton);
+
+      // ローディング状態の確認
+      expect(submitButton).toHaveTextContent("ログイン中...");
+
+      // ログイン成功を待機（タイムアウト設定）
+      await waitFor(
+        () => {
+          expect(mockCognitoSignIn).toHaveBeenCalledWith(
+            "test@example.com",
+            "Password123!"
+          );
+          expect(onSuccess).toHaveBeenCalled();
+        },
+        { timeout: 5000 }
+      );
+    }, 10000); // テストタイムアウトを10秒に設定
+
+    test("無効なメールアドレスでのログイン失敗", async () => {
+      render(<CognitoLoginForm />);
+
+      const emailInput = screen.getByTestId("email-input");
+      const passwordInput = screen.getByTestId("password-input");
+      const submitButton = screen.getByTestId("login-submit");
+
+      // 無効なメールアドレスを入力
+      fireEvent.change(emailInput, { target: { value: "invalid-email" } });
+      fireEvent.change(passwordInput, { target: { value: "Password123!" } });
+
+      // リアルタイムバリデーションエラーの確認
+      await waitFor(
+        () => {
+          expect(screen.getByTestId("email-error")).toHaveTextContent(
+            "有効なメールアドレスを入力してください"
+          );
+        },
+        { timeout: 3000 }
+      );
+
+      // 送信ボタンが無効化されていることを確認
+      expect(submitButton).toBeDisabled();
+    }, 10000);
+
+    test("パスワードが短すぎる場合のログイン失敗", async () => {
+      render(<CognitoLoginForm />);
+
+      const emailInput = screen.getByTestId("email-input");
+      const passwordInput = screen.getByTestId("password-input");
+      const submitButton = screen.getByTestId("login-submit");
+
+      fireEvent.change(emailInput, { target: { value: "test@example.com" } });
+      fireEvent.change(passwordInput, { target: { value: "short" } });
+
+      // リアルタイムバリデーションエラーの確認
+      await waitFor(() => {
+        expect(screen.getByTestId("password-error")).toHaveTextContent(
+          "パスワードは8文字以上である必要があります"
+        );
+      });
+
+      expect(submitButton).toBeDisabled();
+    });
+
+    test("認証失敗時のエラーメッセージ表示", async () => {
+      mockCognitoSignIn.mockResolvedValue({
+        success: false,
+        message: "メールアドレスまたはパスワードが間違っています",
+      });
+
+      render(<CognitoLoginForm />);
+
+      const emailInput = screen.getByTestId("email-input");
+      const passwordInput = screen.getByTestId("password-input");
+      const submitButton = screen.getByTestId("login-submit");
+
+      fireEvent.change(emailInput, { target: { value: "test@example.com" } });
+      fireEvent.change(passwordInput, { target: { value: "WrongPass123!" } });
+      fireEvent.click(submitButton);
+
+      // エラーメッセージの表示を待機
+      await waitFor(() => {
+        expect(screen.getByTestId("error-message")).toHaveTextContent(
+          "メールアドレスまたはパスワードが間違っています"
+        );
+      });
+    });
+
+    test("空のフィールドでの送信防止", async () => {
+      render(<CognitoLoginForm />);
+
+      const submitButton = screen.getByTestId("login-submit");
+
+      // 空の状態では送信ボタンが無効化されていることを確認
+      expect(submitButton).toBeDisabled();
+
+      // cognitoSignIn が呼ばれていないことを確認
+      expect(mockCognitoSignIn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("登録フロー (要件 1.1)", () => {
+    test("正常な登録フロー", async () => {
+      mockCognitoSignUp.mockResolvedValue({
+        success: true,
+        requiresConfirmation: true,
+      });
+
+      render(<CognitoRegisterForm />);
+
+      // すべての必須フィールドを入力
+      fireEvent.change(screen.getByTestId("email-input"), {
+        target: { value: "newuser@example.com" },
+      });
+      fireEvent.change(screen.getByTestId("family-name-input"), {
+        target: { value: "山田" },
+      });
+      fireEvent.change(screen.getByTestId("given-name-input"), {
+        target: { value: "太郎" },
+      });
+      fireEvent.change(screen.getByTestId("phone-number-input"), {
+        target: { value: "090-1234-5678" },
+      });
+      fireEvent.change(screen.getByTestId("password-input"), {
+        target: { value: "SecurePass123!" },
+      });
+      fireEvent.change(screen.getByTestId("confirm-password-input"), {
+        target: { value: "SecurePass123!" },
+      });
+
+      // フォーム送信
+      const submitButton = screen.getByTestId("register-submit");
+      fireEvent.click(submitButton);
+
+      // 登録成功を待機
+      await waitFor(() => {
+        expect(mockCognitoSignUp).toHaveBeenCalledWith(
+          "newuser@example.com",
+          "SecurePass123!",
+          "太郎",
+          "山田",
+          "+8190-1234-5678" // 実際の電話番号フォーマット
+        );
+      });
+
+      // 確認コード入力画面に遷移
+      await waitFor(() => {
+        expect(screen.getByTestId("cognito-confirm-form")).toBeInTheDocument();
+      });
+    });
+
+    test("パスワード強度インジケーターの表示", async () => {
+      render(<CognitoRegisterForm />);
+
+      const passwordInput = screen.getByTestId("password-input");
+
+      // 弱いパスワード
+      fireEvent.change(passwordInput, { target: { value: "weak" } });
+      await waitFor(() => {
+        const strengthIndicator = screen.getByTestId("password-strength");
+        expect(strengthIndicator).toBeInTheDocument();
+      });
+
+      // 強いパスワード
+      fireEvent.change(passwordInput, { target: { value: "StrongPass123!" } });
+      await waitFor(() => {
+        const strengthIndicator = screen.getByTestId("password-strength");
+        expect(strengthIndicator).toBeInTheDocument();
+      });
+    });
+
+    test("パスワード不一致時のエラー表示", async () => {
+      render(<CognitoRegisterForm />);
+
+      fireEvent.change(screen.getByTestId("password-input"), {
+        target: { value: "Password123!" },
+      });
+      fireEvent.change(screen.getByTestId("confirm-password-input"), {
+        target: { value: "DifferentPass123!" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("confirm-password-error")).toHaveTextContent(
+          "パスワードが一致しません"
+        );
+      });
+    });
+
+    test("必須フィールドが空の場合の送信防止", async () => {
+      render(<CognitoRegisterForm />);
+
+      const submitButton = screen.getByTestId("register-submit");
+
+      // 空の状態で送信ボタンをクリック
+      fireEvent.click(submitButton);
+
+      // エラーメッセージの表示を待機
+      await waitFor(() => {
+        expect(screen.getByTestId("error-message")).toHaveTextContent(
+          "入力内容に問題があります"
+        );
+      });
+
+      // cognitoSignUp が呼ばれていないことを確認
+      expect(mockCognitoSignUp).not.toHaveBeenCalled();
+    });
+
+    test("確認コード送信フロー", async () => {
+      mockCognitoSignUp.mockResolvedValue({
+        success: true,
+        requiresConfirmation: true,
+      });
+      mockCognitoConfirmSignUp.mockResolvedValue({
+        success: true,
+      });
+
+      const onSuccess = jest.fn();
+      render(<CognitoRegisterForm onSuccess={onSuccess} />);
+
+      // 登録フォームを入力
+      fireEvent.change(screen.getByTestId("email-input"), {
+        target: { value: "newuser@example.com" },
+      });
+      fireEvent.change(screen.getByTestId("family-name-input"), {
+        target: { value: "山田" },
+      });
+      fireEvent.change(screen.getByTestId("given-name-input"), {
+        target: { value: "太郎" },
+      });
+      fireEvent.change(screen.getByTestId("phone-number-input"), {
+        target: { value: "090-1234-5678" },
+      });
+      fireEvent.change(screen.getByTestId("password-input"), {
+        target: { value: "SecurePass123!" },
+      });
+      fireEvent.change(screen.getByTestId("confirm-password-input"), {
+        target: { value: "SecurePass123!" },
+      });
+
+      fireEvent.click(screen.getByTestId("register-submit"));
+
+      // 確認コード入力画面に遷移
+      await waitFor(() => {
+        expect(screen.getByTestId("cognito-confirm-form")).toBeInTheDocument();
+      });
+
+      // 確認コードを入力
+      const confirmationCodeInput = screen.getByTestId(
+        "confirmation-code-input"
+      );
+      fireEvent.change(confirmationCodeInput, { target: { value: "123456" } });
+
+      // 確認ボタンをクリック
+      fireEvent.click(screen.getByTestId("confirm-submit"));
+
+      // 確認成功を待機
+      await waitFor(() => {
+        expect(mockCognitoConfirmSignUp).toHaveBeenCalledWith(
+          "newuser@example.com",
+          "123456"
+        );
+        expect(onSuccess).toHaveBeenCalled();
+      });
+    });
+
+    test("確認コード再送信機能", async () => {
+      mockCognitoSignUp.mockResolvedValue({
+        success: true,
+        requiresConfirmation: true,
+      });
+      mockCognitoResendSignUpCode.mockResolvedValue({
+        success: true,
+      });
+
+      render(<CognitoRegisterForm />);
+
+      // 登録フォームを入力して送信
+      fireEvent.change(screen.getByTestId("email-input"), {
+        target: { value: "newuser@example.com" },
+      });
+      fireEvent.change(screen.getByTestId("family-name-input"), {
+        target: { value: "山田" },
+      });
+      fireEvent.change(screen.getByTestId("given-name-input"), {
+        target: { value: "太郎" },
+      });
+      fireEvent.change(screen.getByTestId("phone-number-input"), {
+        target: { value: "090-1234-5678" },
+      });
+      fireEvent.change(screen.getByTestId("password-input"), {
+        target: { value: "SecurePass123!" },
+      });
+      fireEvent.change(screen.getByTestId("confirm-password-input"), {
+        target: { value: "SecurePass123!" },
+      });
+
+      fireEvent.click(screen.getByTestId("register-submit"));
+
+      // 確認コード入力画面に遷移
+      await waitFor(() => {
+        expect(screen.getByTestId("cognito-confirm-form")).toBeInTheDocument();
+      });
+
+      // 再送信ボタンをクリック
+      fireEvent.click(screen.getByTestId("resend-code"));
+
+      // 再送信が呼ばれたことを確認
+      await waitFor(() => {
+        expect(mockCognitoResendSignUpCode).toHaveBeenCalledWith(
+          "newuser@example.com"
+        );
+      });
+    });
+  });
+
+  describe("パスワードリセットフロー (要件 9.1, 9.2, 9.3)", () => {
+    test("正常なパスワードリセット要求フロー", async () => {
+      mockCognitoResetPassword.mockResolvedValue({
+        success: true,
+        message: "パスワードリセット用のコードをメールに送信しました",
+      });
+
+      render(<CognitoPasswordResetForm />);
+
+      // メールアドレスを入力
+      const emailInput = screen.getByTestId("email-input");
+      fireEvent.change(emailInput, { target: { value: "user@example.com" } });
+
+      // リセット要求を送信
+      fireEvent.click(screen.getByTestId("request-submit"));
+
+      // リセット要求成功を待機
+      await waitFor(() => {
+        expect(mockCognitoResetPassword).toHaveBeenCalledWith(
+          "user@example.com"
+        );
+        expect(screen.getByTestId("success-message")).toHaveTextContent(
+          "パスワードリセット用のコードをメールに送信しました"
+        );
+      });
+
+      // 確認画面に遷移
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("password-reset-confirm-form")
+        ).toBeInTheDocument();
+      });
+    });
+
+    test("正常なパスワードリセット確認フロー", async () => {
+      mockCognitoResetPassword.mockResolvedValue({
+        success: true,
+      });
+      mockCognitoConfirmResetPassword.mockResolvedValue({
+        success: true,
+        message: "パスワードが正常に変更されました",
+      });
+
+      const onSuccess = jest.fn();
+      render(<CognitoPasswordResetForm onSuccess={onSuccess} />);
+
+      // リセット要求
+      fireEvent.change(screen.getByTestId("email-input"), {
+        target: { value: "user@example.com" },
+      });
+      fireEvent.click(screen.getByTestId("request-submit"));
+
+      // 確認画面に遷移
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("password-reset-confirm-form")
+        ).toBeInTheDocument();
+      });
+
+      // 確認コードと新しいパスワードを入力
+      fireEvent.change(screen.getByTestId("reset-code-input"), {
+        target: { value: "123456" },
+      });
+      fireEvent.change(screen.getByTestId("new-password-input"), {
+        target: { value: "NewSecurePass123!" },
+      });
+      fireEvent.change(screen.getByTestId("confirm-password-input"), {
+        target: { value: "NewSecurePass123!" },
+      });
+
+      // パスワード変更を送信
+      fireEvent.click(screen.getByTestId("confirm-submit"));
+
+      // パスワード変更成功を待機
+      await waitFor(() => {
+        expect(mockCognitoConfirmResetPassword).toHaveBeenCalledWith(
+          "user@example.com",
+          "123456",
+          "NewSecurePass123!"
+        );
+        expect(screen.getByTestId("success-message")).toHaveTextContent(
+          "パスワードが正常に変更されました"
+        );
+      });
+
+      // onSuccess が呼ばれることを確認（2秒後）
+      await waitFor(
+        () => {
+          expect(onSuccess).toHaveBeenCalled();
+        },
+        { timeout: 3000 }
+      );
+    });
+
+    test("無効なメールアドレスでのリセット要求失敗", async () => {
+      render(<CognitoPasswordResetForm />);
+
+      const emailInput = screen.getByTestId("email-input");
+      fireEvent.change(emailInput, { target: { value: "invalid-email" } });
+
+      // リアルタイムバリデーションエラーの確認
+      await waitFor(() => {
+        expect(screen.getByTestId("email-error")).toHaveTextContent(
+          "有効なメールアドレスを入力してください"
+        );
+      });
+
+      // 送信ボタンが無効化されていることを確認
+      expect(screen.getByTestId("request-submit")).toBeDisabled();
+    });
+
+    test("パスワード強度要件を満たさない場合のエラー", async () => {
+      mockCognitoResetPassword.mockResolvedValue({
+        success: true,
+      });
+
+      render(<CognitoPasswordResetForm />);
+
+      // リセット要求
+      fireEvent.change(screen.getByTestId("email-input"), {
+        target: { value: "user@example.com" },
+      });
+      fireEvent.click(screen.getByTestId("request-submit"));
+
+      // 確認画面に遷移
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("password-reset-confirm-form")
+        ).toBeInTheDocument();
+      });
+
+      // 弱いパスワードを入力
+      fireEvent.change(screen.getByTestId("new-password-input"), {
+        target: { value: "weak" },
+      });
+
+      // パスワードエラーの確認
+      await waitFor(() => {
+        expect(screen.getByTestId("password-error")).toBeInTheDocument();
+      });
+
+      // 送信ボタンが無効化されていることを確認
+      expect(screen.getByTestId("confirm-submit")).toBeDisabled();
+    });
+
+    test("確認コード再送信機能", async () => {
+      mockCognitoResetPassword.mockResolvedValue({
+        success: true,
+      });
+
+      render(<CognitoPasswordResetForm />);
+
+      // リセット要求
+      fireEvent.change(screen.getByTestId("email-input"), {
+        target: { value: "user@example.com" },
+      });
+      fireEvent.click(screen.getByTestId("request-submit"));
+
+      // 確認画面に遷移
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("password-reset-confirm-form")
+        ).toBeInTheDocument();
+      });
+
+      // 再送信ボタンをクリック
+      fireEvent.click(screen.getByTestId("resend-code"));
+
+      // 再送信が呼ばれたことを確認
+      await waitFor(() => {
+        expect(mockCognitoResetPassword).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
+});
