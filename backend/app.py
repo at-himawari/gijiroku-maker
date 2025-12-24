@@ -13,8 +13,7 @@ import time
 from datetime import datetime
 from pydantic import BaseModel
 from models import UserCreate, SessionCreate, AuthLogCreate, CognitoRegisterRequest, CognitoLoginRequest, CognitoRefreshTokenRequest, CognitoLogoutRequest, CognitoPasswordResetRequest, CognitoPasswordResetConfirmRequest, CognitoPhoneVerificationRequest, CognitoResendVerificationRequest, UserProfileUpdateRequest, UserPreferencesUpdateRequest
-from google.cloud.speech_v2.services.speech import SpeechAsyncClient
-from google.cloud.speech_v2 import types
+from google.cloud import speech
 from starlette.websockets import WebSocketState
 from dotenv import load_dotenv
 from database import db_manager
@@ -26,10 +25,11 @@ from logging_service import logging_service
 from session_manager import session_manager
 from migration_middleware import migration_middleware
 from security_monitoring_service import security_monitoring_service
+from contextlib import asynccontextmanager
 
 BUFFER_TIME_SECONDS = 30
 
-app = FastAPI()
+
 
 # ログの設定
 logging.basicConfig(level=logging.INFO)
@@ -44,6 +44,27 @@ allowed_origins = [
     "http://127.0.0.1:3000",
     # 本番環境のドメインを追加
 ]
+
+# アプリケーション起動時にデータベース接続を初期化
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Startup 処理 ---
+    await db_manager.init_pool()
+    # セッションマネージャーのクリーンアップタスクを開始
+    await session_manager.start_cleanup_task()
+    # セキュリティ監視クリーンアップタスクを開始
+    asyncio.create_task(cleanup_security_monitoring())
+    logger.info("アプリケーションが開始されました")
+    
+    yield
+    
+    # --- Shutdown 処理 ---
+    await session_manager.stop_cleanup_task()
+    await db_manager.close_pool()
+    logger.info("アプリケーションが終了されました")
+
+app = FastAPI(lifespan=lifespan)
+
 # セキュリティミドルウェアを追加
 app.add_middleware(SecurityMiddleware, allowed_origins=allowed_origins)
 
@@ -75,22 +96,7 @@ async def cleanup_security_monitoring():
         except Exception as e:
             logger.error(f"セキュリティ監視クリーンアップエラー: {e}")
 
-# アプリケーション起動時にデータベース接続を初期化
-@app.on_event("startup")
-async def startup_event():
-    await db_manager.init_pool()
-    # セッションマネージャーのクリーンアップタスクを開始
-    await session_manager.start_cleanup_task()
-    # セキュリティ監視クリーンアップタスクを開始
-    asyncio.create_task(cleanup_security_monitoring())
-    logger.info("アプリケーションが開始されました")
 
-# アプリケーション終了時にデータベース接続を閉じる
-@app.on_event("shutdown")
-async def shutdown_event():
-    await session_manager.stop_cleanup_task()
-    await db_manager.close_pool()
-    logger.info("アプリケーションが終了されました")
 
 # Google Cloud の認証情報のパスを環境変数から取得
 GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
@@ -131,10 +137,6 @@ app.add_middleware(
 
 
 
-# Google Speech-to-Text 非同期クライアントの初期化
-speech_client = SpeechAsyncClient(
-    client_options={"api_endpoint": f"{GOOGLE_REGION}-speech.googleapis.com"}
-)
 
 # 接続管理クラス
 class ConnectionManager:
@@ -1016,92 +1018,107 @@ async def websocket_endpoint(websocket: WebSocket):
     audio_queue = asyncio.Queue()
     user_context = {"user": None}
 
-    async def request_generator():
-        # Google STT への初期設定リクエスト
-        yield types.StreamingRecognizeRequest(
-            recognizer=f"projects/{GOOGLE_PROJECT_ID}/locations/{GOOGLE_REGION}/recognizers/_",
-            streaming_config=types.StreamingRecognitionConfig(
-                config=types.RecognitionConfig(
-                    explicit_decoding_config=types.ExplicitDecodingConfig(
-                        encoding=types.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
-                        sample_rate_hertz=16000,
-                        audio_channel_count=1,
-                    ),
-                    language_codes=["ja-JP"],
-                    model="long",
+    # 【修正】クライアントをエンドポイント内で初期化
+    async with speech.SpeechAsyncClient() as speech_client:
+        
+        async def request_generator():
+            # Google STT への初期設定リクエスト
+            streaming_config = speech.StreamingRecognitionConfig(
+                config=speech.RecognitionConfig(
+                    encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                    sample_rate_hertz=16000,
+                    language_code="ja-JP",
+                    enable_automatic_punctuation=True,
+                    # model="default", # モデル指定を削除して自動選択に任せる
                 ),
-                streaming_features=types.StreamingRecognitionFeatures(interim_results=True)
+                interim_results=True
             )
-        )
 
-        while True:
-            # キューから音声データを取り出す
-            audio_data = await audio_queue.get()
-            if audio_data is None: # 終了合図
-                break
-            yield types.StreamingRecognizeRequest(audio=audio_data)
+            logger.info("STT: 設定を送信します")
+            yield speech.StreamingRecognizeRequest(streaming_config=streaming_config)
 
-    async def stt_processor():
-        """Google STTからのレスポンスを処理してクライアントに送るタスク"""
-        try:
-            responses = await speech_client.streaming_recognize(requests=request_generator())
-            async for response in responses:
-                if not response.results: continue
-                for result in response.results:
-                    if not result.alternatives: continue
-                    transcript = result.alternatives[0].transcript
-                    is_final = result.is_final
+            while True:
+                # キューから音声データを取り出す
+                audio_data = await audio_queue.get()
+                if audio_data is None: # 終了合図
+                    logger.info("STT: 音声送信終了")
+                    break
+                
+                # 音声データを送る
+                # logger.debug(f"STT: 音声チャンク送信 ({len(audio_data)} bytes)")
+                yield speech.StreamingRecognizeRequest(audio_content=audio_data)
+        async def stt_processor():
+            """Google STTからのレスポンスを処理してクライアントに送るタスク"""
+            logger.info("STT: プロセッサ起動")
+            try:
+                responses = await speech_client.streaming_recognize(requests=request_generator())
+                
+                async for response in responses:
+                    if not response.results: continue
                     
-                    logger.info(f"認識結果: {transcript} (final={is_final})")
-                    await manager.send_personal_message({
-                        "type": "transcription" if is_final else "immediate",
-                        "text": transcript
-                    }, websocket)
-        except Exception as e:
-            logger.error(f"STTプロセッサエラー: {e}")
+                    for result in response.results:
+                        if not result.alternatives: continue
+                        transcript = result.alternatives[0].transcript
+                        is_final = result.is_final
+                        
+                        logger.info(f"認識結果: {transcript} (final={is_final})")
+                        await manager.send_personal_message({
+                            "type": "transcription" if is_final else "immediate",
+                            "text": transcript
+                        }, websocket)
+            except Exception as e:
+                logger.error(f"STTプロセッサエラー: {e}", exc_info=True)
+            finally:
+                logger.info("STT: プロセッサ終了")
+        # STT処理を別タスクで開始
+        stt_task = asyncio.create_task(stt_processor())
 
-    # STT処理を別タスクで開始
-    stt_task = asyncio.create_task(stt_processor())
-
-    try:
-        while True:
-            # メインループでメッセージを受信し続ける
-            message = await websocket.receive()
-            
-            if message["type"] == "websocket.receive":
-                if "text" in message:
-                    # テキストメッセージ（認証）の処理
-                    data = json.loads(message["text"])
-                    if data.get("type") == "auth":
-                        token = data.get("token")
-                        auth_result = await auth_middleware.verify_websocket_auth(token, client_ip)
-                        if auth_result['success']:
-                            user_context["user"] = auth_result['user']
-                            logger.info(f"WebSocket認証成功: {user_context['user'].user_id}")
+        try:
+            while True:
+                # メインループでメッセージを受信し続ける
+                message = await websocket.receive()
+                
+                if message["type"] == "websocket.receive":
+                    if "text" in message:
+                        # テキストメッセージ（認証）の処理
+                        data = json.loads(message["text"])
+                        if data.get("type") == "auth":
+                            token = data.get("token")
+                            auth_result = await auth_middleware.verify_websocket_auth(token, client_ip)
+                            if auth_result['success']:
+                                user_context["user"] = auth_result['user']
+                                logger.info(f"WebSocket認証成功: {user_context['user'].user_id}")
+                            else:
+                                logger.warning(f"WebSocket認証失敗: {auth_result.get('error')}")
+                                await websocket.close(code=4001)
+                                break
+                    elif "bytes" in message:
+                        # 音声データの処理（認証済みの場合のみキューに入れる）
+                        if user_context["user"]:
+                            audio_data = message["bytes"]
+                            # logger.debug(f"音声データ受信: {len(audio_data)} bytes")
+                            await audio_queue.put(audio_data)
                         else:
-                            logger.warning(f"WebSocket認証失敗: {auth_result.get('error')}")
-                            await websocket.close(code=4001)
-                            break
-                elif "bytes" in message:
-                    # 音声データの処理（認証済みの場合のみキューに入れる）
-                    if user_context["user"]:
-                        audio_data = message["bytes"]
-                        logger.debug(f"音声データ受信: {len(audio_data)} bytes")
-                        await audio_queue.put(audio_data)
-                    else:
-                        logger.warning("未認証の音声データを破棄しました")
-            elif message["type"] == "websocket.disconnect":
-                break
+                            # 認証前はログを抑制しつつ破棄（大量に出るため）
+                            pass
+                            # logger.warning("未認証の音声データを破棄しました")
+                elif message["type"] == "websocket.disconnect":
+                    break
 
-    except WebSocketDisconnect:
-        logger.info("WebSocket切断")
-    except Exception as e:
-        logger.error(f"WebSocketループエラー: {e}")
-    finally:
-        await audio_queue.put(None) # ジェネレータを止める
-        stt_task.cancel()
-        manager.disconnect(websocket)
-
+        except WebSocketDisconnect:
+            logger.info("WebSocket切断")
+        except Exception as e:
+            logger.error(f"WebSocketループエラー: {e}")
+        finally:
+            await audio_queue.put(None) # ジェネレータを止める
+            try:
+                # タスクが完了するのを少し待つ
+                await asyncio.wait_for(stt_task, timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                stt_task.cancel()
+            
+            manager.disconnect(websocket)
+                
 @app.get("/auth/migration/status")
 async def get_migration_status():
     """移行状態を取得"""

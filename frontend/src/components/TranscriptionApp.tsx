@@ -50,7 +50,7 @@ export default function TranscriptionApp() {
 
     const wsUrl = WS_URL;
     console.log("WebSocket接続を開始します:", wsUrl);
-    globalWebSocket = new WebSocket(wsUrl);
+    globalWebSocket = new WebSocket(wsUrl,"cognito-auth");
 
     globalWebSocket.onopen = async () => {
       console.log("WebSocket接続が確立されました:", wsUrl);

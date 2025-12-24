@@ -291,7 +291,7 @@ class AuthMiddleware:
             if ip_address:
                 rate_limit_result = await self.check_rate_limit(
                     f"token_verify_{ip_address}", 
-                    max_attempts=100,  # 1時間に100回まで
+                    max_attempts=1000,  # 1時間に100回まで
                     window_minutes=60
                 )
                 
@@ -507,7 +507,7 @@ class AuthMiddleware:
             if client_ip:
                 rate_limit_result = await self.check_rate_limit(
                     f"websocket_{client_ip}", 
-                    max_attempts=20,  # 1時間に20回まで
+                    max_attempts=200,  # 1時間に20回まで
                     window_minutes=60
                 )
                 

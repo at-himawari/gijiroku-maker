@@ -488,15 +488,15 @@ class CognitoTokenService:
                 if expires_in <= 0:
                     expires_in = 3600 # フォールバック
 
-                    session_data = SessionCreate(
-                        user_id=user.user_id,
-                        cognito_user_sub=user_sub,
-                        access_token=access_token,
-                        expires_in=expires_in,
-                        client_ip=ip_address
-                    )
-                    session = await db_manager.create_session(session_data)
-                    logger.info(f"JITセッション作成完了: {session.session_id if session else '失敗'}")
+                session_data = SessionCreate(
+                    user_id=user.user_id,
+                    cognito_user_sub=user_sub,
+                    access_token=access_token,
+                    expires_in=expires_in,
+                    client_ip=ip_address
+                )
+                session = await db_manager.create_session(session_data)
+                logger.info(f"JITセッション作成完了: {session.session_id if session else '失敗'}")
                 
                 if not session:
                     return {
