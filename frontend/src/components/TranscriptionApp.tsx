@@ -74,7 +74,6 @@ export default function TranscriptionApp() {
 
     globalWebSocket.onmessage = (event) => {
       try {
-        console.log("WebSocketメッセージ受信:", event.data);
         const data = JSON.parse(event.data);
         
         // 認証失敗（トークン切れなど）の場合の処理
@@ -85,8 +84,6 @@ export default function TranscriptionApp() {
             variant: "destructive",
           });
           console.error("WebSocket認証失敗:", data.message);
-          // デバッグのため強制ログアウトを一時停止
-          // setTimeout(() => logout(), 2000);
           return;
         }
 
@@ -185,10 +182,6 @@ export default function TranscriptionApp() {
         if (globalWebSocket?.readyState === WebSocket.OPEN) {
           const inputData = e.inputBuffer.getChannelData(0);
           const audioData = convertFloat32ToInt16(inputData);
-          // 音声データ送信ログ（大量に出るため注意）
-          if (Math.random() < 0.05) { // 5%の確率で間引いてログ出力
-            console.log("音声データ送信中... バイト数:", audioData.byteLength);
-          }
           globalWebSocket.send(audioData);
         } else {
             // WebSocketが開いていない場合の警告
