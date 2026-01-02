@@ -3,7 +3,7 @@ import { useState, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { UserProfile, UserProfileResponse } from "@/types/user";
 
-const API_BASE_URL = `http://${process.env.NEXT_PUBLIC_HOST}`;
+const API_BASE_URL = `${process.env.NEXT_PUBLIC_HOST}`;
 
 export function useUserProfile() {
   const { token } = useAuth();
