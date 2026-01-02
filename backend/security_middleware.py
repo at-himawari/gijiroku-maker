@@ -28,8 +28,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         """
         super().__init__(app)
         self.allowed_origins = allowed_origins or [
-            'http://localhost:3000',
-            'https://localhost:3000'
+            "https://gijiroku-maker.at-himawari.com"
         ]
         
         # セキュリティイベントのキャッシュ（本番環境ではRedisを推奨）
