@@ -69,7 +69,7 @@ class DatabaseManager:
     
     def __init__(self):
         """データベース接続設定を初期化"""
-        SECRET_NAME = "prod/gijiroku-maker"
+        SECRET_NAME = "gijiroku_maker/prod"
         secrets = get_aws_secret(SECRET_NAME)
         if secrets and isinstance(secrets, dict):
             self.user = secrets.get('username',"root")
