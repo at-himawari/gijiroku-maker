@@ -201,6 +201,17 @@ class DatabaseManager:
                         INDEX idx_usage_count (usage_count)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """)
+                # seconds_balanceカラムを追加（既存テーブルの場合）
+                try:
+                    await cursor.execute("""
+                        ALTER TABLE app_user_data 
+                        ADD COLUMN seconds_balance FLOAT DEFAULT 300.0
+                    """)
+                    logger.info("app_user_dataテーブルにseconds_balanceカラムを追加しました")
+                except Exception as e:
+                    if "Duplicate column name" not in str(e):
+                        logger.warning(f"seconds_balanceカラム追加でエラー: {e}")
+                    pass
                 
                 logger.info("Cognito中心管理データベーステーブルを作成しました")
     
@@ -606,14 +617,15 @@ class DatabaseManager:
                     await cursor.execute("""
                         INSERT INTO app_user_data 
                         (app_user_id, cognito_sub, subscription_status, usage_count, 
-                         monthly_usage_count, preferences, profile_data, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         monthly_usage_count, seconds_balance, preferences, profile_data, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         app_user_id,
                         cognito_sub,
                         'free',
                         0,
                         0,
+                        300.0, # 初期値5分
                         json.dumps(preferences),
                         json.dumps(profile_data),
                         datetime.utcnow(),
@@ -625,6 +637,7 @@ class DatabaseManager:
             return {
                 'app_user_id': app_user_id,
                 'cognito_sub': cognito_sub,
+                'seconds_balance': 300.0,
                 'subscription_status': 'free',
                 'usage_count': 0,
                 'monthly_usage_count': 0,
@@ -639,7 +652,7 @@ class DatabaseManager:
             return None
     
     async def get_app_user_data_by_cognito_sub(self, cognito_sub: str) -> Optional[dict]:
-        """Cognito Subでアプリケーションユーザーデータを取得"""
+        """Cognito Subでアプリケーションユーザーデータを取得（月次リセットチェック付き）"""
         try:
             async with self.pool.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -649,18 +662,72 @@ class DatabaseManager:
                     
                     row = await cursor.fetchone()
                     if row:
-                        # JSONフィールドをパース
-                        result = dict(row)
-                        if result.get('preferences'):
-                            result['preferences'] = json.loads(result['preferences'])
-                        if result.get('profile_data'):
-                            result['profile_data'] = json.loads(result['profile_data'])
-                        return result
+                        data = dict(row)
+                        # 月次リセットチェック
+                        last_reset = data.get('last_usage_reset')
+                        now = datetime.utcnow()
+                        # 前回リセットから月が変わっているかチェック
+                        if last_reset and (now.year > last_reset.year or now.month > last_reset.month):
+                            # 月が変わった場合、Freeプラン分(300秒)を下回っていれば300秒まで補充
+                            # (購入分は持ち越すが、Free枠は毎月リセットという考え方で、最低300秒を保証)
+                            new_balance = data['seconds_balance']
+                            if new_balance < 300.0:
+                                new_balance = 300.0
+                            
+                            await cursor.execute("""
+                                UPDATE app_user_data 
+                                SET monthly_usage_count = 0, last_usage_reset = %s, seconds_balance = %s
+                                WHERE cognito_sub = %s
+                            """, (now, new_balance, cognito_sub))
+                            data['seconds_balance'] = new_balance
+                            data['monthly_usage_count'] = 0
+                        
+                        # JSONパース
+                        if data.get('preferences') and isinstance(data['preferences'], str):
+                            data['preferences'] = json.loads(data['preferences'])
+                        if data.get('profile_data') and isinstance(data['profile_data'], str):
+                            data['profile_data'] = json.loads(data['profile_data'])
+                        return data
                     return None
-                    
         except Exception as e:
-            logger.error(f"アプリケーションユーザーデータ取得エラー: {e}")
+            logger.error(f"データ取得エラー: {e}")
             return None
+        
+    async def add_balance(self, cognito_sub: str, seconds: float) -> bool:
+        """残高を追加（Stripe購入時など）"""
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        UPDATE app_user_data 
+                        SET seconds_balance = seconds_balance + %s, 
+                            subscription_status = 'premium',
+                            updated_at = %s
+                        WHERE cognito_sub = %s
+                    """, (seconds, datetime.utcnow(), cognito_sub))
+            logger.info(f"残高を追加しました: {cognito_sub} (+{seconds}s)")
+            return True
+        except Exception as e:
+            logger.error(f"残高追加エラー: {e}")
+            return False
+
+    async def deduct_balance(self, cognito_sub: str, seconds: float) -> bool:
+        """残高を消費（音声認識利用時）"""
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        UPDATE app_user_data 
+                        SET seconds_balance = GREATEST(0, seconds_balance - %s),
+                            usage_count = usage_count + 1,
+                            monthly_usage_count = monthly_usage_count + 1,
+                            updated_at = %s
+                        WHERE cognito_sub = %s
+                    """, (seconds, datetime.utcnow(), cognito_sub))
+            return True
+        except Exception as e:
+            logger.error(f"残高消費エラー: {e}")
+            return False
     
     async def get_app_user_data_by_app_id(self, app_user_id: str) -> Optional[dict]:
         """アプリケーションユーザーIDでデータを取得"""

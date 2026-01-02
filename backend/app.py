@@ -26,6 +26,8 @@ from session_manager import session_manager
 from migration_middleware import migration_middleware
 from security_monitoring_service import security_monitoring_service
 from contextlib import asynccontextmanager
+import stripe
+from models import CheckoutSessionRequest
 
 BUFFER_TIME_SECONDS = 30
 
@@ -37,6 +39,11 @@ logger = logging.getLogger(__name__)
 
 # dotenvを読み込む
 load_dotenv()
+
+# Stripe設定
+STRIPE_API_KEY = os.getenv("STRIPE_API_KEY")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+stripe.api_key = STRIPE_API_KEY
 
 # セキュリティミドルウェアを追加
 allowed_origins = [
@@ -121,8 +128,7 @@ audio_buffer = bytearray()
 
 # CORS設定
 origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    "https://gijiroku-maker.at-himawari.com",
 ]
 
 app.add_middleware(
@@ -229,6 +235,77 @@ async def generate_minutes(transcript: str):
     except Exception as e:
         logger.error(f"Error generating minutes: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="議事録の生成中にエラーが発生しました。")
+    
+
+@app.post("/payment/create-checkout-session")
+async def create_checkout_session(request: CheckoutSessionRequest, auth_context: Dict = Depends(require_auth)):
+    """Stripe Checkout Sessionを作成"""
+    user = auth_context['user']
+    try:
+        # 30分 = 500円
+        unit_amount = 500
+        quantity = request.quantity
+        
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'jpy',
+                    'product_data': {
+                        'name': '議事録作成クレジット (30分)',
+                        'description': '音声認識と議事録作成のための追加時間（30分単位）',
+                    },
+                    'unit_amount': unit_amount,
+                },
+                'quantity': quantity,
+            }],
+            mode='payment',
+            success_url=f"{allowed_origins[0]}/?payment=success",
+            cancel_url=f"{allowed_origins[0]}/?payment=cancel",
+            client_reference_id=user.cognito_user_sub,
+            metadata={
+                'user_id': user.user_id,
+                'cognito_sub': user.cognito_user_sub,
+                'add_seconds': str(1800 * quantity) # 30分 * 60秒 * 個数
+            }
+        )
+        return {"url": checkout_session.url}
+    except Exception as e:
+        logger.error(f"Stripe session creation error: {e}")
+        raise HTTPException(status_code=500, detail="決済セッションの作成に失敗しました")
+
+@app.post("/payment/webhook")
+async def stripe_webhook(request: Request):
+    """Stripe Webhook ハンドラ"""
+    payload = await request.body()
+    sig_header = request.headers.get('stripe-signature')
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError as e:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    # 決済完了イベントの処理
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        
+        # メタデータからユーザー情報と追加時間を取得
+        cognito_sub = session.get('client_reference_id')
+        metadata = session.get('metadata', {})
+        add_seconds = float(metadata.get('add_seconds', 1800))
+        
+        if cognito_sub:
+            success = await db_manager.add_balance(cognito_sub, add_seconds)
+            if success:
+                logger.info(f"Payment successful for {cognito_sub}: Added {add_seconds} seconds")
+            else:
+                logger.error(f"Failed to add balance for {cognito_sub}")
+
+    return {"status": "success"}
 
 # 議事録生成エンドポイント（認証必須）
 @app.post("/generate_minutes")
@@ -1039,11 +1116,25 @@ async def websocket_endpoint(websocket: WebSocket):
                 # キューから音声データを取り出す
                 audio_data = await audio_queue.get()
                 if audio_data is None: # 終了合図
-                    logger.info("STT: 音声送信終了")
                     break
+
+                # --- 課金ロジック: 残高チェック ---
+                # 16kHz, 16bit(2bytes) -> 32000 bytes/sec
+                chunk_seconds = len(audio_data) / 32000.0
                 
-                # 音声データを送る
-                # logger.debug(f"STT: 音声チャンク送信 ({len(audio_data)} bytes)")
+                # バランスが不足している場合は停止
+                if user_context["balance"] - (user_context["session_usage"] + chunk_seconds) < 0:
+                    logger.warning(f"User {user_context['user'].user_id} run out of balance")
+                    await manager.send_personal_message({
+                        "type": "error", 
+                        "message": "利用可能時間を使い切りました。クレジットを購入してください。"
+                    }, websocket)
+                    await websocket.close(code=4002) # 4002: Insufficient Balance
+                    break
+
+                user_context["session_usage"] += chunk_seconds
+                yield speech.StreamingRecognizeRequest(audio_content=audio_data)
+                
                 yield speech.StreamingRecognizeRequest(audio_content=audio_data)
         async def stt_processor():
             """Google STTからのレスポンスを処理してクライアントに送るタスク"""
@@ -1070,50 +1161,55 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.info("STT: プロセッサ終了")
         # STT処理を別タスクで開始
         stt_task = asyncio.create_task(stt_processor())
-
         try:
             while True:
-                # メインループでメッセージを受信し続ける
                 message = await websocket.receive()
                 
                 if message["type"] == "websocket.receive":
                     if "text" in message:
-                        # テキストメッセージ（認証）の処理
                         data = json.loads(message["text"])
                         if data.get("type") == "auth":
                             token = data.get("token")
                             auth_result = await auth_middleware.verify_websocket_auth(token, client_ip)
                             if auth_result['success']:
-                                user_context["user"] = auth_result['user']
-                                logger.info(f"WebSocket認証成功: {user_context['user'].user_id}")
+                                user = auth_result['user']
+                                user_context["user"] = user
+                                # DBから最新の残高を取得
+                                app_data = await db_manager.get_app_user_data_by_cognito_sub(user.cognito_user_sub)
+                                user_context["balance"] = app_data.get("seconds_balance", 0.0) if app_data else 0.0
+                                
+                                logger.info(f"WebSocket認証成功: {user.user_id}, Balance: {user_context['balance']}s")
+                                
+                                # 残高情報をクライアントに送信
+                                await manager.send_personal_message({
+                                    "type": "balance_info",
+                                    "balance": user_context["balance"]
+                                }, websocket)
                             else:
-                                logger.warning(f"WebSocket認証失敗: {auth_result.get('error')}")
                                 await websocket.close(code=4001)
                                 break
                     elif "bytes" in message:
-                        # 音声データの処理（認証済みの場合のみキューに入れる）
                         if user_context["user"]:
-                            audio_data = message["bytes"]
-                            # logger.debug(f"音声データ受信: {len(audio_data)} bytes")
-                            await audio_queue.put(audio_data)
-                        else:
-                            # 認証前はログを抑制しつつ破棄（大量に出るため）
-                            pass
-                            # logger.warning("未認証の音声データを破棄しました")
+                            await audio_queue.put(message["bytes"])
+                            
                 elif message["type"] == "websocket.disconnect":
                     break
 
         except WebSocketDisconnect:
             logger.info("WebSocket切断")
-        except Exception as e:
-            logger.error(f"WebSocketループエラー: {e}")
         finally:
-            await audio_queue.put(None) # ジェネレータを止める
+            await audio_queue.put(None)
             try:
-                # タスクが完了するのを少し待つ
+                # タイムアウト付きでタスク終了待ち
                 await asyncio.wait_for(stt_task, timeout=1.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
+            except Exception:
                 stt_task.cancel()
+            
+            # --- 最終的な使用量をDBから差し引く ---
+            if user_context["user"] and user_context["session_usage"] > 0:
+                used = user_context["session_usage"]
+                await db_manager.deduct_balance(user_context["user"].cognito_user_sub, used)
+                logger.info(f"Session closed. Deducted {used:.2f} seconds.")
             
             manager.disconnect(websocket)
                 

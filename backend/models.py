@@ -155,3 +155,8 @@ class AppUserDataCreate(BaseModel):
     cognito_sub: str
     preferences: Optional[dict] = None
     profile_data: Optional[dict] = None
+
+class CheckoutSessionRequest(BaseModel):
+    """Stripe決済セッション作成リクエスト"""
+    price_id: Optional[str] = None # 特定の商品IDを指定する場合
+    quantity: int = 1 # 30分単位の個数

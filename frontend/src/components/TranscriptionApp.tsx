@@ -10,6 +10,8 @@ import {
   CreditCardIcon,
   RefreshCwIcon,
   AlertCircleIcon,
+  ClockIcon,
+  PlusIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -19,12 +21,9 @@ import { useUserProfile } from "@/hooks/useUserProfile";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // 追加
 
 const SAMPLE_RATE = 16000;
-// NEXT_PUBLIC_WS_BASE_URL があればそれを使用、なければ NEXT_PUBLIC_HOST から構築
-const WS_URL =
-  process.env.NEXT_PUBLIC_WS_BASE_URL ||
-  `ws://${process.env.NEXT_PUBLIC_HOST}/ws`;
+const WS_URL = process.env.NEXT_PUBLIC_WS_BASE_URL!;
 // APIのベースURL
-const API_BASE_URL = `http://${process.env.NEXT_PUBLIC_HOST}`;
+const API_BASE_URL = process.env.NEXT_PUBLIC_HOST!;
 
 // グローバルなWebSocket管理（Reactの再レンダリングに影響されない）
 let globalWebSocket: WebSocket | null = null;
@@ -51,6 +50,47 @@ export default function TranscriptionApp() {
     loading: profileLoading,
     error: profileError,
   } = useUserProfile();
+
+  const handleBuyCredits = async () => {
+    if (!token) return;
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/payment/create-checkout-session`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ quantity: 1 }), // 30分 x 1
+        }
+      );
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        toast({
+          title: "エラー",
+          description: "決済ページの取得に失敗しました",
+          variant: "destructive",
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      toast({
+        title: "エラー",
+        description: "通信エラーが発生しました",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // 秒数を「分:秒」形式に変換する関数
+  const formatSeconds = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}分${s}秒`;
+  };
 
   useEffect(() => {
     if (token) {
