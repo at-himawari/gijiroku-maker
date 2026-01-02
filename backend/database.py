@@ -15,17 +15,69 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+import boto3
+import json
+from botocore.exceptions import ClientError
+
+# AWS Secrets Managerからシークレットを取得する関数
+def get_aws_secret(secret_name: str, region_name: str = "ap-northeast-1"):
+    """
+    AWS Secrets Managerから値を取得する関数
+    
+    Args:
+        secret_name: Secrets Managerで作成したシークレットの名前
+        region_name: リージョン名（デフォルトは東京: ap-northeast-1）
+        
+    Returns:
+        dict: シークレットのキーと値の辞書 (JSONの場合)
+        str:  単なる文字列として保存されている場合は文字列
+    """
+
+    # セッションの作成
+    session = boto3.session.Session()
+    client = session.client(
+        service_name='secretsmanager',
+        region_name=region_name
+    )
+
+    try:
+        get_secret_value_response = client.get_secret_value(
+            SecretId=secret_name
+        )
+    except ClientError as e:
+        # 権限エラーや存在しないシークレットなどのエラーハンドリング
+        print(f"エラーが発生しました: {e}")
+        raise e
+
+    # シークレットの取得
+    if 'SecretString' in get_secret_value_response:
+        secret = get_secret_value_response['SecretString']
+        
+        # JSON形式であれば辞書に変換して返すのが便利です
+        try:
+            return json.loads(secret)
+        except json.JSONDecodeError:
+            # JSONでない単純な文字列の場合はそのまま返す
+            return secret
+    else:
+        # バイナリデータの場合（あまり一般的ではありませんがデコードが必要）
+        return get_secret_value_response['SecretBinary']
+
 
 class DatabaseManager:
     """データベース管理クラス"""
     
     def __init__(self):
         """データベース接続設定を初期化"""
-        self.host = os.getenv('DB_HOST', 'localhost')
-        self.port = int(os.getenv('DB_PORT', 3306))
-        self.user = os.getenv('DB_USER', 'root')
-        self.password = os.getenv('DB_PASSWORD', '')
-        self.database = os.getenv('DB_NAME', 'gijiroku_maker')
+        SECRET_NAME = "gijiroku_maker/prod"
+        secrets = get_aws_secret(SECRET_NAME)
+        if secrets and isinstance(secrets, dict):
+            self.user = secrets.get('username',"root")
+            self.password = secrets.get('password',"")
+            self.database = secrets.get('dbname',"gijiroku_maker")
+            self.host = secrets.get('host', 'localhost')
+            self.port = int(secrets.get('port', 3306))        
+
         self.pool = None
     
     async def init_pool(self):

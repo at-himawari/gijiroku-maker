@@ -40,9 +40,7 @@ load_dotenv()
 
 # セキュリティミドルウェアを追加
 allowed_origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    # 本番環境のドメインを追加
+    "https://gijiroku-maker.at-himawari.com",
 ]
 
 # アプリケーション起動時にデータベース接続を初期化
