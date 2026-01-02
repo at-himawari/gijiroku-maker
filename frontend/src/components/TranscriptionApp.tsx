@@ -9,12 +9,14 @@ import {
   LogOutIcon,
   CreditCardIcon,
   RefreshCwIcon,
+  AlertCircleIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchAuthSession } from "aws-amplify/auth";
 import Image from "next/image";
 import { useUserProfile } from "@/hooks/useUserProfile";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // 追加
 
 const SAMPLE_RATE = 16000;
 // NEXT_PUBLIC_WS_BASE_URL があればそれを使用、なければ NEXT_PUBLIC_HOST から構築
@@ -43,7 +45,12 @@ export default function TranscriptionApp() {
   const { logout, token, user } = useAuth();
 
   // ★課金情報取得用のフックを使用
-  const { profile, fetchProfile, loading: profileLoading } = useUserProfile();
+  const {
+    profile,
+    fetchProfile,
+    loading: profileLoading,
+    error: profileError,
+  } = useUserProfile();
 
   useEffect(() => {
     if (token) {
@@ -294,6 +301,16 @@ export default function TranscriptionApp() {
 
   return (
     <div className="container mx-auto">
+      {/* エラーがある場合はアラートを表示 */}
+      {profileError && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertCircleIcon className="h-4 w-4" />
+          <AlertTitle>プロフィール取得エラー</AlertTitle>
+          <AlertDescription>
+            {profileError} (再読み込みを試してください)
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="flex justify-between items-center border-b-2 border-yellow-400 mb-2">
         <div className="flex items-center">
           <Image width={30} height={30} src="/logo.png" alt="logo" />
@@ -302,7 +319,11 @@ export default function TranscriptionApp() {
           </h1>
         </div>
         <div className="flex items-center space-x-4">
-          {profile && (
+          {profileLoading && !profile ? (
+            <div className="hidden md:flex items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3 text-gray-400">
+              読み込み中...
+            </div>
+          ) : profile ? (
             <div className="hidden md:flex items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3">
               <div className="flex items-center text-gray-700">
                 <CreditCardIcon className="w-4 h-4 mr-1 text-blue-500" />
@@ -323,7 +344,7 @@ export default function TranscriptionApp() {
                 <span>利用回数: {profile.usage_count}回</span>
               </div>
             </div>
-          )}
+          ) : null}
           <div className="flex items-center space-x-2">
             <div
               className={`w-3 h-3 rounded-full ${
