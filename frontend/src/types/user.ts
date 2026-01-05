@@ -4,6 +4,7 @@ export interface UserProfile {
   email: string | null;
   name: string | null;
   subscription_status: 'free' | 'premium'; // バックエンドの定義に合わせる
+  seconds_balance: number; // 利用可能な音声認識時間（秒）
   usage_count: number;
   monthly_usage_count: number;
   preferences: Record<string, any>;
