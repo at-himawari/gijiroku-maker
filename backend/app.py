@@ -1091,7 +1091,7 @@ async def websocket_endpoint(websocket: WebSocket):
     
     # 音声データ用キュー
     audio_queue = asyncio.Queue()
-    user_context = {"user": None}
+    user_context = {"user": None, "balance": 0.0, "session_usage": 0.0}
 
     # 【修正】クライアントをエンドポイント内で初期化
     async with speech.SpeechAsyncClient() as speech_client:
@@ -1155,6 +1155,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "transcription" if is_final else "immediate",
                             "text": transcript
                         }, websocket)
+            except asyncio.CancelledError:
+                logger.info("STTプロセッサキャンセル")
             except Exception as e:
                 logger.error(f"STTプロセッサエラー: {e}", exc_info=True)
             finally:
@@ -1176,6 +1178,11 @@ async def websocket_endpoint(websocket: WebSocket):
                                 user_context["user"] = user
                                 # DBから最新の残高を取得
                                 app_data = await db_manager.get_app_user_data_by_cognito_sub(user.cognito_user_sub)
+                                
+                                if not app_data:
+                                    logger.info(f"WebSocket: Creating initial data for {user.user_id}")
+                                    app_data = await db_manager.create_app_user_data(user.cognito_user_sub)
+
                                 user_context["balance"] = app_data.get("seconds_balance", 0.0) if app_data else 0.0
                                 
                                 logger.info(f"WebSocket認証成功: {user.user_id}, Balance: {user_context['balance']}s")
@@ -1244,9 +1251,18 @@ async def get_user_profile(auth_context: Dict = Depends(require_auth)):
     """ユーザープロフィール取得（Cognito属性 + アプリケーションデータ）"""
     try:
         user = auth_context['user']
-        
-        # Cognitoからユーザー属性を取得
-        cognito_profile = await cognito_service.get_user_profile(user.cognito_user_sub)
+
+        # ★修正: Cognito取得エラーを無視して続行するように try-except で囲む
+        cognito_profile = {}
+        try:
+            cognito_profile = await cognito_service.get_user_profile(user.cognito_user_sub)
+        except Exception as e:
+            logger.warning(f"Cognitoプロフィール取得失敗（無視して続行）: {e}")
+            # エラー時は最低限の情報をセット
+            cognito_profile = {
+                'email': getattr(user, 'email', None),
+                'name': 'User'
+            }
         
         # アプリケーションデータを取得
         app_data = await db_manager.get_app_user_data_by_cognito_sub(user.cognito_user_sub)
