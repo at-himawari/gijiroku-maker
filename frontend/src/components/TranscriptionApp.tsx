@@ -40,6 +40,8 @@ export default function TranscriptionApp() {
   const [connectionStatus, setConnectionStatus] = useState<
     "disconnected" | "connecting" | "connected" | "error"
   >("disconnected");
+  // 残高（秒）の状態管理
+  const [balance, setBalance] = useState<number | null>(null);
   const { toast } = useToast();
   const { logout, token, user } = useAuth();
 
@@ -50,6 +52,13 @@ export default function TranscriptionApp() {
     loading: profileLoading,
     error: profileError,
   } = useUserProfile();
+
+  // プロフィール読み込み時に残高をstateにセット
+  useEffect(() => {
+    if (profile) {
+      setBalance(profile.seconds_balance);
+    }
+  }, [profile]);
 
   const handleBuyCredits = async () => {
     if (!token) return;
@@ -239,6 +248,17 @@ export default function TranscriptionApp() {
         return;
       }
 
+      // 残高チェック
+      if (balance !== null && balance <= 0) {
+        toast({
+          title: "残高不足",
+          description:
+            "利用可能時間がありません。クレジットを購入してください。",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
       sourceRef.current =
@@ -377,6 +397,24 @@ export default function TranscriptionApp() {
                 >
                   {profile.subscription_status}
                 </span>
+              </div>
+              <div className="h-4 w-px bg-gray-300"></div>
+              {/* 利用回数の代わりに残り時間を表示（または併記） */}
+              <div className="flex items-center text-gray-700">
+                <ClockIcon className="w-4 h-4 mr-1 text-orange-500" />
+                <span className="mr-1">
+                  残り時間: {formatSeconds(balance ?? 0)}
+                </span>
+                {/* ★追加: 購入ボタン */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 rounded-full bg-blue-100 hover:bg-blue-200 text-blue-600 ml-1"
+                  onClick={handleBuyCredits}
+                  title="時間を追加購入（30分 500円）"
+                >
+                  <PlusIcon className="h-3 w-3" />
+                </Button>
               </div>
               <div className="h-4 w-px bg-gray-300"></div>
               <div className="flex items-center text-gray-700">
