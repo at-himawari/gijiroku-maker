@@ -290,7 +290,14 @@ export default function TranscriptionApp() {
         return;
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: SAMPLE_RATE,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+      } });
       streamRef.current = stream;
       audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
       const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
@@ -298,6 +305,10 @@ export default function TranscriptionApp() {
       await audioContextRef.current.audioWorklet.addModule(workletUrl);
       sourceRef.current =
         audioContextRef.current.createMediaStreamSource(stream);
+      
+      const gainNode = audioContextRef.current.createGain();
+
+      gainNode.gain.value = 2.5; // 音量を2.5倍に増幅
 
       const processor = new AudioWorkletNode(
         audioContextRef.current,
@@ -312,7 +323,8 @@ export default function TranscriptionApp() {
         }
       };
 
-      sourceRef.current.connect(processorRef.current);
+      sourceRef.current.connect(gainNode);
+      gainNode.connect(processorRef.current);
       processorRef.current.connect(audioContextRef.current.destination);
 
       setIsRecording(true);
