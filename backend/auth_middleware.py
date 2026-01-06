@@ -242,8 +242,7 @@ class AuthMiddleware:
             
             # 許可されたオリジン
             allowed_origins = [
-                'http://localhost:3000',
-                'https://localhost:3000',
+                "https://gijiroku-maker.at-himawari.com"
                 # 本番環境のドメインを追加
             ]
             
