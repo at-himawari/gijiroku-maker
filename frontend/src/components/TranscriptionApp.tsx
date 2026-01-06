@@ -419,11 +419,11 @@ export default function TranscriptionApp() {
         </div>
       </div>
       {profileLoading && !profile ? (
-        <div className="items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3 text-gray-400">
+        <div className="flex items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3 text-gray-400">
           読み込み中...
         </div>
       ) : profile ? (
-        <div className="items-center bg-gray-100 rounded-lg px-3 py-3 my-2 text-sm space-x-3">
+        <div className="flex items-center bg-gray-100 rounded-lg px-3 py-3 my-2 text-sm space-x-3">
           <div className="flex items-center text-gray-700">
             <CreditCardIcon className="w-4 h-4 mr-1 text-blue-500" />
             <span className="font-semibold mr-1">プラン:</span>

@@ -1281,6 +1281,7 @@ async def get_user_profile(auth_context: Dict = Depends(require_auth)):
             'email_verified': cognito_profile.get('email_verified', False) if cognito_profile else False,
             'phone_number_verified': cognito_profile.get('phone_number_verified', False) if cognito_profile else False,
             'subscription_status': app_data.get('subscription_status', 'free') if app_data else 'free',
+            'seconds_balance': app_data.get('seconds_balance', 0.0) if app_data else 0.0,
             'usage_count': app_data.get('usage_count', 0) if app_data else 0,
             'monthly_usage_count': app_data.get('monthly_usage_count', 0) if app_data else 0,
             'preferences': app_data.get('preferences', {}) if app_data else {},
