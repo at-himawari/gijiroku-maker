@@ -56,7 +56,9 @@ export default function TranscriptionApp() {
   // プロフィール読み込み時に残高をstateにセット
   useEffect(() => {
     if (profile) {
-      setBalance(profile.seconds_balance);
+      const receivedBalance =
+        profile.seconds_balance ?? (profile as any).secondsBalance;
+      setBalance(receivedBalance);
     }
   }, [profile]);
 
@@ -379,50 +381,6 @@ export default function TranscriptionApp() {
           </h1>
         </div>
         <div className="flex items-center space-x-4">
-          {profileLoading && !profile ? (
-            <div className="hidden md:flex items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3 text-gray-400">
-              読み込み中...
-            </div>
-          ) : profile ? (
-            <div className="hidden md:flex items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3">
-              <div className="flex items-center text-gray-700">
-                <CreditCardIcon className="w-4 h-4 mr-1 text-blue-500" />
-                <span className="font-semibold mr-1">プラン:</span>
-                <span
-                  className={`uppercase ${
-                    profile.subscription_status === "premium"
-                      ? "text-purple-600 font-bold"
-                      : "text-gray-600"
-                  }`}
-                >
-                  {profile.subscription_status}
-                </span>
-              </div>
-              <div className="h-4 w-px bg-gray-300"></div>
-              {/* 利用回数の代わりに残り時間を表示（または併記） */}
-              <div className="flex items-center text-gray-700">
-                <ClockIcon className="w-4 h-4 mr-1 text-orange-500" />
-                <span className="mr-1">
-                  残り時間: {formatSeconds(balance ?? 0)}
-                </span>
-                {/* ★追加: 購入ボタン */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 rounded-full bg-blue-100 hover:bg-blue-200 text-blue-600 ml-1"
-                  onClick={handleBuyCredits}
-                  title="時間を追加購入（30分 500円）"
-                >
-                  <PlusIcon className="h-3 w-3" />
-                </Button>
-              </div>
-              <div className="h-4 w-px bg-gray-300"></div>
-              <div className="flex items-center text-gray-700">
-                <RefreshCwIcon className="w-4 h-4 mr-1 text-green-500" />
-                <span>利用回数: {profile.usage_count}回</span>
-              </div>
-            </div>
-          ) : null}
           <div className="flex items-center space-x-2">
             <div
               className={`w-3 h-3 rounded-full ${
@@ -460,6 +418,63 @@ export default function TranscriptionApp() {
           </Button>
         </div>
       </div>
+      {profileLoading && !profile ? (
+        <div className="hidden md:flex items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3 text-gray-400">
+          読み込み中...
+        </div>
+      ) : profile ? (
+        <div className="hidden md:flex items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3">
+          <div className="flex items-center text-gray-700">
+            <CreditCardIcon className="w-4 h-4 mr-1 text-blue-500" />
+            <span className="font-semibold mr-1">プラン:</span>
+            <span
+              className={`uppercase ${
+                profile.subscription_status === "premium"
+                  ? "text-purple-600 font-bold"
+                  : "text-gray-600"
+              }`}
+            >
+              {profile.subscription_status}
+            </span>
+          </div>
+          <div className="h-4 w-px bg-gray-300"></div>
+          {/* 利用回数の代わりに残り時間を表示（または併記） */}
+          <div className="flex items-center text-gray-700">
+            <ClockIcon className="w-4 h-4 mr-1 text-orange-500" />
+            <span className="mr-1">
+              残り時間: {formatSeconds(balance ?? 0)}
+              </span>
+              {/* 更新ボタン */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 rounded-full hover:bg-gray-200 text-gray-500 ml-1"
+              onClick={fetchProfile} // プロフィールを再取得する関数を呼ぶ
+              title="残高を更新"
+              disabled={profileLoading} // 読み込み中は無効化
+            >
+              <RefreshCwIcon
+                className={`h-3 w-3 ${profileLoading ? "animate-spin" : ""}`}
+              />
+            </Button>
+            {/* 購入ボタン */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 rounded-full bg-blue-100 hover:bg-blue-200 text-blue-600 ml-1"
+              onClick={handleBuyCredits}
+              title="時間を追加購入（30分 500円）"
+            >
+              <PlusIcon className="h-3 w-3" />
+            </Button>
+          </div>
+          <div className="h-4 w-px bg-gray-300"></div>
+          <div className="flex items-center text-gray-700">
+            <RefreshCwIcon className="w-4 h-4 mr-1 text-green-500" />
+            <span>利用回数: {profile.usage_count}回</span>
+          </div>
+        </div>
+      ) : null}
       <div className="mb-4 space-x-2">
         {isRecording ? (
           <Button
