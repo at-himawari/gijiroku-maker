@@ -404,48 +404,52 @@ export default function TranscriptionApp() {
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex items-center mb-4">
-        <Image width={30} height={30} src="/logo.png" alt="logo" />
-        <h1 className="text-2xl font-bold ml-2">リアルタイム議事録システム</h1>
-      </div>
-      <div className="flex justify-between items-center border-b-2 border-yellow-400 mb-2">
-        <div className="flex items-center"></div>
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2">
-            <div
-              className={`w-3 h-3 rounded-full ${
-                connectionStatus === "connected"
-                  ? "bg-green-500"
+      <div className="flex">
+        <div className="flex items-center mb-4">
+          <Image width={30} height={30} src="/logo.png" alt="logo" />
+          <h1 className="text-2xl font-bold ml-2">
+            リアルタイム議事録システム
+          </h1>
+        </div>
+        <div className="flex justify-between items-center border-b-2 border-yellow-400 mb-2">
+          <div className="flex items-center"></div>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <div
+                className={`w-3 h-3 rounded-full ${
+                  connectionStatus === "connected"
+                    ? "bg-green-500"
+                    : connectionStatus === "connecting"
+                    ? "bg-yellow-500 animate-pulse"
+                    : "bg-red-500"
+                }`}
+              ></div>
+              <span className="text-sm text-gray-600">
+                {connectionStatus === "connected"
+                  ? "接続済み"
                   : connectionStatus === "connecting"
-                  ? "bg-yellow-500 animate-pulse"
-                  : "bg-red-500"
-              }`}
-            ></div>
-            <span className="text-sm text-gray-600">
-              {connectionStatus === "connected"
-                ? "接続済み"
-                : connectionStatus === "connecting"
-                ? "接続中..."
-                : "未接続"}
-            </span>
+                  ? "接続中..."
+                  : "未接続"}
+              </span>
+            </div>
+            {user && (
+              <div className="text-sm text-gray-600">{user.email} さん</div>
+            )}
+            <Button
+              onClick={async () => {
+                isExplicitlyClosing = true;
+                if (globalWebSocket) globalWebSocket.close();
+                globalWebSocket = null;
+                if (isRecording) stopRecording();
+                logout();
+              }}
+              variant="outline"
+              size="sm"
+            >
+              <LogOutIcon className="w-4 h-4 mr-2" />
+              ログアウト
+            </Button>
           </div>
-          {user && (
-            <div className="text-sm text-gray-600">{user.email} さん</div>
-          )}
-          <Button
-            onClick={async () => {
-              isExplicitlyClosing = true;
-              if (globalWebSocket) globalWebSocket.close();
-              globalWebSocket = null;
-              if (isRecording) stopRecording();
-              logout();
-            }}
-            variant="outline"
-            size="sm"
-          >
-            <LogOutIcon className="w-4 h-4 mr-2" />
-            ログアウト
-          </Button>
         </div>
       </div>
       {profileLoading && !profile ? (
