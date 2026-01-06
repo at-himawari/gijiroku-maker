@@ -25,6 +25,35 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_BASE_URL!;
 // APIのベースURL
 const API_BASE_URL = process.env.NEXT_PUBLIC_HOST!;
 
+const WORKLET_CODE = `
+class RecorderProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.bufferSize = 1024;
+    this.buffer = new Float32Array(this.bufferSize);
+    this.bufferIndex = 0;
+  }
+
+  process(inputs, outputs, parameters) {
+    const input = inputs[0];
+    if (input && input.length > 0) {
+      const channelData = input[0];
+      for (let i = 0; i < channelData.length; i++) {
+        this.buffer[this.bufferIndex++] = channelData[i];
+        if (this.bufferIndex === this.bufferSize) {
+          // バッファがいっぱいになったらメインスレッドへ送信
+          this.port.postMessage(this.buffer.slice());
+          this.bufferIndex = 0;
+        }
+      }
+    }
+    return true; // プロセッサーを維持
+  }
+}
+registerProcessor('recorder-processor', RecorderProcessor);
+`;
+
+
 // グローバルなWebSocket管理（Reactの再レンダリングに影響されない）
 let globalWebSocket: WebSocket | null = null;
 let isExplicitlyClosing = false;
@@ -34,7 +63,7 @@ export default function TranscriptionApp() {
   const [minutes, setMinutes] = useState<string>("");
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const processorRef = useRef<AudioWorkletNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [allTranscript, setAllTranscript] = useState<string>("");
   const [immediate, setImmediate] = useState<string>("");
@@ -265,34 +294,31 @@ export default function TranscriptionApp() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
+      const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
+      const workletUrl = URL.createObjectURL(blob);
+      await audioContextRef.current.audioWorklet.addModule(workletUrl);
       sourceRef.current =
         audioContextRef.current.createMediaStreamSource(stream);
-      processorRef.current = audioContextRef.current.createScriptProcessor(
-        1024,
-        1,
-        1
+      
+      const processor = new AudioWorkletNode(
+        audioContextRef.current,
+        'recorder-processor'
       );
+      processorRef.current = processor;
+
+      processor.port.onmessage = (e) => {
+        if (globalWebSocket?.readyState === WebSocket.OPEN) {
+          const audioData = convertFloat32ToInt16(e.data);
+          globalWebSocket.send(audioData);
+        }
+      };
 
       sourceRef.current.connect(processorRef.current);
       processorRef.current.connect(audioContextRef.current.destination);
 
-      processorRef.current.onaudioprocess = (e) => {
-        if (globalWebSocket?.readyState === WebSocket.OPEN) {
-          const inputData = e.inputBuffer.getChannelData(0);
-          const audioData = convertFloat32ToInt16(inputData);
-          globalWebSocket.send(audioData);
-        } else {
-          // WebSocketが開いていない場合の警告
-          if (Math.random() < 0.01) {
-            console.warn(
-              "WebSocketがOPENでないため音声データを送信できません。readyState:",
-              globalWebSocket?.readyState
-            );
-          }
-        }
-      };
-
       setIsRecording(true);
+      URL.revokeObjectURL(workletUrl);
+      
     } catch (error) {
       console.error("Error accessing microphone:", error);
       toast({
@@ -311,6 +337,7 @@ export default function TranscriptionApp() {
     if (audioContextRef.current) {
       sourceRef.current?.disconnect();
       processorRef.current?.disconnect();
+      processorRef.current = null;
       audioContextRef.current.close();
     }
     setIsRecording(false);
