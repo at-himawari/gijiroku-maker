@@ -423,7 +423,7 @@ export default function TranscriptionApp() {
           読み込み中...
         </div>
       ) : profile ? (
-        <div className="hidden md:flex items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3">
+        <div className="items-center bg-gray-100 rounded-lg px-3 py-3 my-2 text-sm space-x-3">
           <div className="flex items-center text-gray-700">
             <CreditCardIcon className="w-4 h-4 mr-1 text-blue-500" />
             <span className="font-semibold mr-1">プラン:</span>
@@ -443,8 +443,8 @@ export default function TranscriptionApp() {
             <ClockIcon className="w-4 h-4 mr-1 text-orange-500" />
             <span className="mr-1">
               残り時間: {formatSeconds(balance ?? 0)}
-              </span>
-              {/* 更新ボタン */}
+            </span>
+            {/* 更新ボタン */}
             <Button
               variant="ghost"
               size="icon"
