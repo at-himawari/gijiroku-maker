@@ -1150,7 +1150,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         transcript = result.alternatives[0].transcript
                         is_final = result.is_final
                         
-                        logger.info(f"認識結果: {transcript} (final={is_final})")
                         await manager.send_personal_message({
                             "type": "transcription" if is_final else "immediate",
                             "text": transcript

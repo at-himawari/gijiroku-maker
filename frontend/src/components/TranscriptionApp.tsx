@@ -35,6 +35,7 @@ export default function TranscriptionApp() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [allTranscript, setAllTranscript] = useState<string>("");
   const [immediate, setImmediate] = useState<string>("");
   const [connectionStatus, setConnectionStatus] = useState<
@@ -262,6 +263,7 @@ export default function TranscriptionApp() {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
       sourceRef.current =
         audioContextRef.current.createMediaStreamSource(stream);
@@ -302,6 +304,10 @@ export default function TranscriptionApp() {
   };
 
   const stopRecording = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
     if (audioContextRef.current) {
       sourceRef.current?.disconnect();
       processorRef.current?.disconnect();
