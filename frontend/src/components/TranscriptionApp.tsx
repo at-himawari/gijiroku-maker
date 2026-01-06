@@ -419,7 +419,7 @@ export default function TranscriptionApp() {
         </div>
       </div>
       {profileLoading && !profile ? (
-        <div className="hidden md:flex items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3 text-gray-400">
+        <div className="items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3 text-gray-400">
           読み込み中...
         </div>
       ) : profile ? (
