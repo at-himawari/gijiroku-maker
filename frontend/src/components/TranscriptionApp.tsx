@@ -53,7 +53,6 @@ class RecorderProcessor extends AudioWorkletProcessor {
 registerProcessor('recorder-processor', RecorderProcessor);
 `;
 
-
 // グローバルなWebSocket管理（Reactの再レンダリングに影響されない）
 let globalWebSocket: WebSocket | null = null;
 let isExplicitlyClosing = false;
@@ -299,10 +298,10 @@ export default function TranscriptionApp() {
       await audioContextRef.current.audioWorklet.addModule(workletUrl);
       sourceRef.current =
         audioContextRef.current.createMediaStreamSource(stream);
-      
+
       const processor = new AudioWorkletNode(
         audioContextRef.current,
-        'recorder-processor'
+        "recorder-processor"
       );
       processorRef.current = processor;
 
@@ -318,7 +317,6 @@ export default function TranscriptionApp() {
 
       setIsRecording(true);
       URL.revokeObjectURL(workletUrl);
-      
     } catch (error) {
       console.error("Error accessing microphone:", error);
       toast({
@@ -406,13 +404,12 @@ export default function TranscriptionApp() {
           </AlertDescription>
         </Alert>
       )}
+      <div className="flex items-center mb-4">
+        <Image width={30} height={30} src="/logo.png" alt="logo" />
+        <h1 className="text-2xl font-bold ml-2">リアルタイム議事録システム</h1>
+      </div>
       <div className="flex justify-between items-center border-b-2 border-yellow-400 mb-2">
-        <div className="flex items-center">
-          <Image width={30} height={30} src="/logo.png" alt="logo" />
-          <h1 className="text-2xl font-bold ml-2">
-            リアルタイム議事録システム
-          </h1>
-        </div>
+        <div className="flex items-center"></div>
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
             <div
@@ -457,19 +454,6 @@ export default function TranscriptionApp() {
         </div>
       ) : profile ? (
         <div className="flex items-center bg-gray-100 rounded-lg px-3 py-3 my-2 text-sm space-x-3">
-          <div className="flex items-center text-gray-700">
-            <CreditCardIcon className="w-4 h-4 mr-1 text-blue-500" />
-            <span className="font-semibold mr-1">プラン:</span>
-            <span
-              className={`uppercase ${
-                profile.subscription_status === "premium"
-                  ? "text-purple-600 font-bold"
-                  : "text-gray-600"
-              }`}
-            >
-              {profile.subscription_status}
-            </span>
-          </div>
           <div className="h-4 w-px bg-gray-300"></div>
           {/* 利用回数の代わりに残り時間を表示（または併記） */}
           <div className="flex items-center text-gray-700">
