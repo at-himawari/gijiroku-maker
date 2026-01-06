@@ -7,7 +7,6 @@ import {
   SquareIcon,
   DownloadIcon,
   LogOutIcon,
-  CreditCardIcon,
   RefreshCwIcon,
   AlertCircleIcon,
   ClockIcon,
@@ -297,7 +296,8 @@ export default function TranscriptionApp() {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-      } });
+        },
+      });
       streamRef.current = stream;
       audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
       const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
@@ -305,7 +305,7 @@ export default function TranscriptionApp() {
       await audioContextRef.current.audioWorklet.addModule(workletUrl);
       sourceRef.current =
         audioContextRef.current.createMediaStreamSource(stream);
-      
+
       const gainNode = audioContextRef.current.createGain();
 
       gainNode.gain.value = 2.5; // 音量を2.5倍に増幅
@@ -416,14 +416,14 @@ export default function TranscriptionApp() {
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex">
+      <div className="grid grid-cols-1 md:grid-cols-2 items-center border-b-2 border-yellow-400">
         <div className="flex items-center mb-4">
           <Image width={30} height={30} src="/logo.png" alt="logo" />
           <h1 className="text-2xl font-bold ml-2">
             リアルタイム議事録システム
           </h1>
         </div>
-        <div className="flex justify-between items-center border-b-2 border-yellow-400 mb-2">
+        <div className="flex justify-between items-center mb-2">
           <div className="flex items-center"></div>
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
@@ -470,7 +470,6 @@ export default function TranscriptionApp() {
         </div>
       ) : profile ? (
         <div className="flex items-center bg-gray-100 rounded-lg px-3 py-3 my-2 text-sm space-x-3">
-          <div className="h-4 w-px bg-gray-300"></div>
           {/* 利用回数の代わりに残り時間を表示（または併記） */}
           <div className="flex items-center text-gray-700">
             <ClockIcon className="w-4 h-4 mr-1 text-orange-500" />
