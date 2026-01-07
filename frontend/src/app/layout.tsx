@@ -9,9 +9,21 @@ const favicon = "/logo.png";
 
 export const metadata: Metadata = {
   title: "議事録メーカー",
-  description: "A real-time transcription and minutes generation system",
+  description: "議事録の作成が苦手なあなた！文字起こしを行い、要約を簡単に行うことができます！",
   icons: {
     icon: favicon,
+  },
+  openGraph: {
+    title: "議事録メーカー",
+    description: "議事録の作成が苦手なあなた！文字起こしを行い、要約を簡単に行うことができます！",
+    images: [
+      {
+        url: "https://gijiroku-maker.at-himawari.com/logo.png",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
   },
 };
 
