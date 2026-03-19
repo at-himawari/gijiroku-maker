@@ -70,6 +70,7 @@ export default function TranscriptionApp() {
   >("disconnected");
   // 残高（秒）の状態管理
   const [balance, setBalance] = useState<number | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
   const { logout, token, user } = useAuth();
 
@@ -355,6 +356,7 @@ export default function TranscriptionApp() {
 
   const generateMinutes = async () => {
     if (!token) return;
+    setIsGenerating(true);
     try {
       const response = await fetch(`${API_BASE_URL}/generate_minutes`, {
         method: "POST",
@@ -382,6 +384,8 @@ export default function TranscriptionApp() {
         description: "議事録の生成に失敗しました。",
         variant: "destructive",
       });
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -532,9 +536,19 @@ export default function TranscriptionApp() {
         <Button
           onClick={generateMinutes}
           className="bg-blue-500 hover:bg-blue-600 text-white"
-          disabled={!allTranscript}
+          disabled={!allTranscript || isGenerating}
         >
-          議事録生成
+          {isGenerating ? (
+            <>
+              <RefreshCwIcon className="w-4 h-4 mr-2 animate-spin" />
+              生成中...
+            </>
+          ) : (
+            <>
+              <RefreshCwIcon className="w-4 h-4 mr-2" />
+              議事録生成
+            </>
+          )}
         </Button>
         {minutes && (
           <Button
