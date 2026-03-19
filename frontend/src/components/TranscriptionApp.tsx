@@ -102,7 +102,7 @@ export default function TranscriptionApp() {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ quantity: 1 }), // 30分 x 1
-        }
+        },
       );
       const data = await response.json();
       if (data.url) {
@@ -170,7 +170,7 @@ export default function TranscriptionApp() {
             JSON.stringify({
               type: "auth",
               token: latestToken,
-            })
+            }),
           );
         }
       } catch (err) {
@@ -308,11 +308,11 @@ export default function TranscriptionApp() {
 
       const gainNode = audioContextRef.current.createGain();
 
-      gainNode.gain.value = 2.5; // 音量を2.5倍に増幅
+      gainNode.gain.value = 1.5; // 音量を2.5倍に増幅
 
       const processor = new AudioWorkletNode(
         audioContextRef.current,
-        "recorder-processor"
+        "recorder-processor",
       );
       processorRef.current = processor;
 
@@ -399,7 +399,10 @@ export default function TranscriptionApp() {
     const l = buffer.length;
     const buf = new Int16Array(l);
     for (let i = 0; i < l; i++) {
-      buf[i] = Math.min(1, buffer[i]) * 0x7fff;
+      // -1.0 から 1.0 の範囲に値を制限（クリッピング）する
+      const s = Math.max(-1, Math.min(1, buffer[i]));
+      // 負の場合は 0x8000 (32768)、正の場合は 0x7fff (32767) を掛けるのがより正確です
+      buf[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
     }
     return buf.buffer;
   };
@@ -432,16 +435,16 @@ export default function TranscriptionApp() {
                   connectionStatus === "connected"
                     ? "bg-green-500"
                     : connectionStatus === "connecting"
-                    ? "bg-yellow-500 animate-pulse"
-                    : "bg-red-500"
+                      ? "bg-yellow-500 animate-pulse"
+                      : "bg-red-500"
                 }`}
               ></div>
               <span className="text-sm text-gray-600">
                 {connectionStatus === "connected"
                   ? "接続済み"
                   : connectionStatus === "connecting"
-                  ? "接続中..."
-                  : "未接続"}
+                    ? "接続中..."
+                    : "未接続"}
               </span>
             </div>
             {user && (
