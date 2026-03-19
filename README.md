@@ -202,3 +202,6 @@ GCP>コンソール>IAMと管理>サービスアカウント>サービスアカ�
 
 ### アプリへアクセス
 `http://localhost:3000`へWebブラウザでアクセスします。
+
+## backendデプロイ
+` gcloud run deploy gijiroku-backend --source . --region asia-northeast1 `
