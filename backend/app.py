@@ -226,7 +226,7 @@ async def generate_minutes(transcript: str):
         full_prompt = f"{SYSTEM_INSTRUCTION}\n\n{prompt}"
         
         response = await client.aio.models.generate_content(
-            model='gemini-2.0-flash-exp',
+            model='gemini-3.1-flash-lite-preview',
             contents=full_prompt
         )
         
@@ -1135,7 +1135,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 user_context["session_usage"] += chunk_seconds
                 yield speech.StreamingRecognizeRequest(audio_content=audio_data)
                 
-                yield speech.StreamingRecognizeRequest(audio_content=audio_data)
+                
         async def stt_processor():
             """Google STTからのレスポンスを処理してクライアントに送るタスク"""
             logger.info("STT: プロセッサ起動")

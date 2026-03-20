@@ -595,7 +595,7 @@ export const CognitoRegisterForm: React.FC<CognitoRegisterFormProps> = ({
             value={formData.phoneNumber}
             onChange={(e) => handleInputChange("phoneNumber", e.target.value)}
             onFocus={() => handleFieldFocus("phoneNumber")}
-            placeholder="090-1234-5678"
+            placeholder="09012345678"
             disabled={isLoading}
             data-testid="phone-number-input"
             className={`mt-1 ${
