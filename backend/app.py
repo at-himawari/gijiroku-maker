@@ -1113,51 +1113,64 @@ async def websocket_endpoint(websocket: WebSocket):
             yield speech.StreamingRecognizeRequest(streaming_config=streaming_config)
 
             while True:
-                # キューから音声データを取り出す
-                audio_data = await audio_queue.get()
-                if audio_data is None: # 終了合図
-                    break
+                try:
+                    audio_data = await asyncio.wait_for(audio_queue.get(), timeout=1.0)
 
-                # --- 課金ロジック: 残高チェック ---
-                # 16kHz, 16bit(2bytes) -> 32000 bytes/sec
-                chunk_seconds = len(audio_data) / 32000.0
-                
-                # バランスが不足している場合は停止
-                if user_context["balance"] - (user_context["session_usage"] + chunk_seconds) < 0:
-                    logger.warning(f"User {user_context['user'].user_id} run out of balance")
-                    await manager.send_personal_message({
-                        "type": "error", 
-                        "message": "利用可能時間を使い切りました。クレジットを購入してください。"
-                    }, websocket)
-                    await websocket.close(code=4002) # 4002: Insufficient Balance
-                    break
+                    if audio_data is None: # 終了合図
+                        break
 
-                user_context["session_usage"] += chunk_seconds
-                yield speech.StreamingRecognizeRequest(audio_content=audio_data)
+                    # --- 課金ロジック: 残高チェック ---
+                    # 16kHz, 16bit(2bytes) -> 32000 bytes/sec
+                    chunk_seconds = len(audio_data) / 32000.0
+                    
+                    # バランスが不足している場合は停止
+                    if user_context["balance"] - (user_context["session_usage"] + chunk_seconds) < 0:
+                        logger.warning(f"User {user_context['user'].user_id} run out of balance")
+                        await manager.send_personal_message({
+                            "type": "error", 
+                            "message": "利用可能時間を使い切りました。クレジットを購入してください。"
+                        }, websocket)
+                        await websocket.close(code=4002) # 4002: Insufficient Balance
+                        break
+
+                    user_context["session_usage"] += chunk_seconds
+                    yield speech.StreamingRecognizeRequest(audio_content=audio_data)
+                except asyncio.TimeoutError:
+                    silence_data = b'\x00' * 3200
+                    yield speech.StreamingRecognizeRequest(audio_content=silence_data)
+
                 
                 
         async def stt_processor():
             """Google STTからのレスポンスを処理してクライアントに送るタスク"""
             logger.info("STT: プロセッサ起動")
             try:
-                responses = await speech_client.streaming_recognize(requests=request_generator())
-                
-                async for response in responses:
-                    if not response.results: continue
-                    
-                    for result in response.results:
-                        if not result.alternatives: continue
-                        transcript = result.alternatives[0].transcript
-                        is_final = result.is_final
+                while True:
+                    try:
+                        responses = await speech_client.streaming_recognize(requests=request_generator())
                         
-                        await manager.send_personal_message({
-                            "type": "transcription" if is_final else "immediate",
-                            "text": transcript
+                        async for response in responses:
+                            if not response.results: continue
+                            
+                            for result in response.results:
+                                if not result.alternatives: continue
+                                transcript = result.alternatives[0].transcript
+                                is_final = result.is_final
+                                
+                                await manager.send_personal_message({
+                                    "type": "transcription" if is_final else "immediate",
+                                    "text": transcript
                         }, websocket)
+                        break
+                    except Exception as e:
+                        logger.error(f"STTプロセッサエラー: {e}")
+                        # ネットワーク切断や、Google STTの5分間制限で切れた場合は少し待って再接続
+                        await asyncio.sleep(1)
+                        logger.info("STT: ストリームの再接続を試みます...")
+                        continue
+
             except asyncio.CancelledError:
                 logger.info("STTプロセッサキャンセル")
-            except Exception as e:
-                logger.error(f"STTプロセッサエラー: {e}", exc_info=True)
             finally:
                 logger.info("STT: プロセッサ終了")
         # STT処理を別タスクで開始
