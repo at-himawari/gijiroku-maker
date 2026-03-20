@@ -15,7 +15,7 @@ export class GijirokuMakerStack extends cdk.Stack {
       signInAliases: {
         email: true,
         username: false,
-        phone: false,
+        phone: true,
       },
 
       // 自動検証設定
