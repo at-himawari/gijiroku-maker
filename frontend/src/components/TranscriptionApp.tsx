@@ -11,6 +11,8 @@ import {
   AlertCircleIcon,
   ClockIcon,
   PlusIcon,
+  HistoryIcon,
+  TrashIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -56,6 +58,13 @@ registerProcessor('recorder-processor', RecorderProcessor);
 let globalWebSocket: WebSocket | null = null;
 let isExplicitlyClosing = false;
 
+interface HistoryItem {
+  id: string;
+  date: string;
+  transcript: string;
+  minutes: string;
+}
+
 export default function TranscriptionApp() {
   const [isRecording, setIsRecording] = useState(false);
   const [minutes, setMinutes] = useState<string>("");
@@ -71,6 +80,7 @@ export default function TranscriptionApp() {
   // 残高（秒）の状態管理
   const [balance, setBalance] = useState<number | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const { toast } = useToast();
   const { logout, token, user } = useAuth();
 
@@ -82,6 +92,17 @@ export default function TranscriptionApp() {
     error: profileError,
   } = useUserProfile();
 
+  useEffect(() => {
+    try {
+      const savedHistory = localStorage.getItem("transcription_history");
+      if (savedHistory) {
+        setHistory(JSON.parse(savedHistory));
+      }
+    } catch (e) {
+      console.error("履歴の読み込みに失敗しました", e);
+    }
+  }, []);
+
   // プロフィール読み込み時に残高をstateにセット
   useEffect(() => {
     if (profile) {
@@ -90,6 +111,41 @@ export default function TranscriptionApp() {
       setBalance(receivedBalance);
     }
   }, [profile]);
+
+  const saveToHistory = (transcript: string, mins: string) => {
+    const newItem: HistoryItem = {
+      id: Date.now().toString(),
+      date: new Date().toLocaleString("ja-JP"),
+      transcript,
+      minutes: mins,
+    };
+    // 最新のものを先頭に追加し、最大20件まで保持する
+    const updatedHistory = [newItem, ...history].slice(0, 20);
+    setHistory(updatedHistory);
+    localStorage.setItem(
+      "transcription_history",
+      JSON.stringify(updatedHistory),
+    );
+  };
+
+  const loadFromHistory = (item: HistoryItem) => {
+    setAllTranscript(item.transcript);
+    setMinutes(item.minutes);
+    toast({
+      title: "履歴を読み込みました",
+      description: `${item.date} の記録を表示しています`,
+    });
+  };
+
+  const deleteHistoryItem = (id: string) => {
+    const updatedHistory = history.filter((h) => h.id !== id);
+    setHistory(updatedHistory);
+    localStorage.setItem(
+      "transcription_history",
+      JSON.stringify(updatedHistory),
+    );
+    toast({ title: "履歴を削除しました" });
+  };
 
   const handleBuyCredits = async () => {
     if (!token) return;
@@ -372,6 +428,7 @@ export default function TranscriptionApp() {
       if (!response.ok) throw new Error("Minutes generation failed");
       const data = await response.json();
       setMinutes(data.minutes);
+      saveToHistory(allTranscript, data.minutes);
 
       // 議事録生成成功時に使用回数を更新するため再取得
       await fetchProfile();
@@ -581,6 +638,51 @@ export default function TranscriptionApp() {
             className="w-full h-[300px] p-2 border rounded"
           />
         </div>
+      </div>
+      <div className="mt-12 border-t pt-6">
+        <h2 className="text-xl font-semibold mb-4 flex items-center text-gray-800">
+          <HistoryIcon className="w-5 h-5 mr-2" />
+          過去の録音履歴
+        </h2>
+        {history.length === 0 ? (
+          <p className="text-gray-500 text-sm">履歴はありません。</p>
+        ) : (
+          <div className="space-y-3">
+            {history.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-col md:flex-row md:items-center justify-between p-4 border rounded-lg bg-gray-50 shadow-sm"
+              >
+                <div className="mb-3 md:mb-0">
+                  <p className="font-semibold text-sm text-gray-700">
+                    {item.date}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1 line-clamp-2 md:w-96">
+                    {item.transcript || "文字起こしデータなし"}
+                  </p>
+                </div>
+                <div className="flex space-x-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => loadFromHistory(item)}
+                    className="bg-white"
+                  >
+                    復元して表示
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                    onClick={() => deleteHistoryItem(item.id)}
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
