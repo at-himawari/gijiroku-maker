@@ -81,6 +81,7 @@ export default function TranscriptionApp() {
   const [balance, setBalance] = useState<number | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const { toast } = useToast();
   const { logout, token, user } = useAuth();
 
@@ -92,32 +93,91 @@ export default function TranscriptionApp() {
     error: profileError,
   } = useUserProfile();
 
+  const updateHistory = useCallback(
+    (sessionId: string, transcript: string, mins: string) => {
+      if (!sessionId || (!transcript && !mins)) return;
+
+      setHistory((prev) => {
+        const existingIndex = prev.findIndex((h) => h.id === sessionId);
+        let updatedHistory;
+
+        if (existingIndex >= 0) {
+          // すでに同じIDの履歴があれば、最新のテキストで上書き更新する（重複を防ぐ）
+          updatedHistory = [...prev];
+          updatedHistory[existingIndex] = {
+            ...updatedHistory[existingIndex],
+            transcript,
+            minutes: mins,
+            date: new Date().toLocaleString("ja-JP"), // 更新日時を最新にする
+          };
+        } else {
+          // 新しいIDなら先頭に新規追加
+          const newItem: HistoryItem = {
+            id: sessionId,
+            date: new Date().toLocaleString("ja-JP"),
+            transcript,
+            minutes: mins,
+          };
+          updatedHistory = [newItem, ...prev].slice(0, 20);
+        }
+
+        localStorage.setItem(
+          "transcription_history",
+          JSON.stringify(updatedHistory),
+        );
+        return updatedHistory;
+      });
+    },
+    [],
+  );
+
+  // --- 変更: 初回読み込み時の復元処理 ---
   useEffect(() => {
     try {
+      // 履歴一覧の復元
+      const savedHistory = localStorage.getItem("transcription_history");
+      if (savedHistory) setHistory(JSON.parse(savedHistory));
+
+      // 作業中データの復元
       const savedTranscript = localStorage.getItem("current_transcript");
       const savedMinutes = localStorage.getItem("current_minutes");
+      const savedSessionId = localStorage.getItem("current_session_id");
+
       if (savedTranscript) setAllTranscript(savedTranscript);
       if (savedMinutes) setMinutes(savedMinutes);
+
+      // セッションIDの復元（なければ新規発行）
+      if (savedSessionId) {
+        setCurrentSessionId(savedSessionId);
+      } else {
+        const newId = Date.now().toString();
+        setCurrentSessionId(newId);
+        localStorage.setItem("current_session_id", newId);
+      }
     } catch (e) {
-      console.error("作業データの復元に失敗しました", e);
+      console.error("データの復元に失敗しました", e);
     }
   }, []);
 
+  // --- 変更: テキストが更新されるたびに自動保存＆履歴も更新 ---
   useEffect(() => {
     if (allTranscript) {
       localStorage.setItem("current_transcript", allTranscript);
     } else {
       localStorage.removeItem("current_transcript");
     }
-  }, [allTranscript]);
 
-  useEffect(() => {
     if (minutes) {
       localStorage.setItem("current_minutes", minutes);
     } else {
       localStorage.removeItem("current_minutes");
     }
-  }, [minutes]);
+
+    // 文字起こしや議事録が変化したら、履歴一覧にも即座に上書き同期する
+    if (currentSessionId && (allTranscript || minutes)) {
+      updateHistory(currentSessionId, allTranscript, minutes);
+    }
+  }, [allTranscript, minutes, currentSessionId, updateHistory]);
 
   useEffect(() => {
     try {
@@ -142,36 +202,39 @@ export default function TranscriptionApp() {
   const clearCurrentSession = () => {
     if (
       window.confirm(
-        "現在の文字起こしデータと議事録をクリアしますか？（履歴に保存したデータは消えません）",
+        "画面のデータをクリアして、新しい会議を始めますか？（履歴には残ります）",
       )
     ) {
       setAllTranscript("");
       setMinutes("");
       setImmediate("");
+
+      // 新しい会議用のIDを発行
+      const newId = Date.now().toString();
+      setCurrentSessionId(newId);
+
       localStorage.removeItem("current_transcript");
       localStorage.removeItem("current_minutes");
+      localStorage.setItem("current_session_id", newId);
     }
   };
 
-  const saveToHistory = (transcript: string, mins: string) => {
-    const newItem: HistoryItem = {
-      id: Date.now().toString(),
-      date: new Date().toLocaleString("ja-JP"),
-      transcript,
-      minutes: mins,
-    };
-    // 最新のものを先頭に追加し、最大20件まで保持する
-    const updatedHistory = [newItem, ...history].slice(0, 20);
-    setHistory(updatedHistory);
-    localStorage.setItem(
-      "transcription_history",
-      JSON.stringify(updatedHistory),
-    );
-  };
-
   const loadFromHistory = (item: HistoryItem) => {
+    if ((allTranscript || minutes) && currentSessionId !== item.id) {
+      if (
+        !window.confirm(
+          "現在表示中のデータは上書きされます。履歴を読み込みますか？",
+        )
+      )
+        return;
+    }
     setAllTranscript(item.transcript);
     setMinutes(item.minutes);
+
+    // 過去のIDを復元（これ以降の変更は過去の履歴を上書きするようになる）
+    setCurrentSessionId(item.id);
+    localStorage.setItem("current_session_id", item.id);
+
     toast({
       title: "履歴を読み込みました",
       description: `${item.date} の記録を表示しています`,
@@ -469,7 +532,6 @@ export default function TranscriptionApp() {
       if (!response.ok) throw new Error("Minutes generation failed");
       const data = await response.json();
       setMinutes(data.minutes);
-      saveToHistory(allTranscript, data.minutes);
 
       // 議事録生成成功時に使用回数を更新するため再取得
       await fetchProfile();
