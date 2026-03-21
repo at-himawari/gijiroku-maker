@@ -14,6 +14,7 @@ import {
   HistoryIcon,
   TrashIcon,
   CopyPlusIcon,
+  LoaderCircleIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -634,7 +635,8 @@ export default function TranscriptionApp() {
       </div>
       {profileLoading && !profile ? (
         <div className="flex items-center bg-gray-100 rounded-lg px-3 py-1 text-sm space-x-3 text-gray-400">
-          読み込み中...
+          <LoaderCircleIcon className="animate-spin" />
+          インスタンスを起動中。しばらくお待ちください...
         </div>
       ) : profile ? (
         <div className="flex items-center bg-gray-100 rounded-lg px-3 py-3 my-2 text-sm space-x-3">
