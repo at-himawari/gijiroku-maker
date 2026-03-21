@@ -677,7 +677,7 @@ export default function TranscriptionApp() {
           </div>
         </div>
       ) : null}
-      <div className="mb-4 space-x-2">
+      <div className="mb-4 flex flex-wrap gap-3">
         <Button
           onClick={clearCurrentSession}
           variant="outline"
