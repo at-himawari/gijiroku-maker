@@ -94,6 +94,33 @@ export default function TranscriptionApp() {
 
   useEffect(() => {
     try {
+      const savedTranscript = localStorage.getItem("current_transcript");
+      const savedMinutes = localStorage.getItem("current_minutes");
+      if (savedTranscript) setAllTranscript(savedTranscript);
+      if (savedMinutes) setMinutes(savedMinutes);
+    } catch (e) {
+      console.error("作業データの復元に失敗しました", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (allTranscript) {
+      localStorage.setItem("current_transcript", allTranscript);
+    } else {
+      localStorage.removeItem("current_transcript");
+    }
+  }, [allTranscript]);
+
+  useEffect(() => {
+    if (minutes) {
+      localStorage.setItem("current_minutes", minutes);
+    } else {
+      localStorage.removeItem("current_minutes");
+    }
+  }, [minutes]);
+
+  useEffect(() => {
+    try {
       const savedHistory = localStorage.getItem("transcription_history");
       if (savedHistory) {
         setHistory(JSON.parse(savedHistory));
@@ -111,6 +138,20 @@ export default function TranscriptionApp() {
       setBalance(receivedBalance);
     }
   }, [profile]);
+
+  const clearCurrentSession = () => {
+    if (
+      window.confirm(
+        "現在の文字起こしデータと議事録をクリアしますか？（履歴に保存したデータは消えません）",
+      )
+    ) {
+      setAllTranscript("");
+      setMinutes("");
+      setImmediate("");
+      localStorage.removeItem("current_transcript");
+      localStorage.removeItem("current_minutes");
+    }
+  };
 
   const saveToHistory = (transcript: string, mins: string) => {
     const newItem: HistoryItem = {
@@ -616,6 +657,16 @@ export default function TranscriptionApp() {
             議事録をダウンロード
           </Button>
         )}
+
+        <Button
+          onClick={clearCurrentSession}
+          variant="outline"
+          className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+          disabled={!allTranscript && !minutes}
+        >
+          <TrashIcon className="w-4 h-4 mr-2" />
+          クリア
+        </Button>
       </div>
       <div className="my-2">
         {immediate && <p className="text-slate-500">リアルタイム文字起こし</p>}
