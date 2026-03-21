@@ -13,6 +13,7 @@ import {
   PlusIcon,
   HistoryIcon,
   TrashIcon,
+  CopyPlusIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -675,6 +676,15 @@ export default function TranscriptionApp() {
         </div>
       ) : null}
       <div className="mb-4 space-x-2">
+        <Button
+          onClick={clearCurrentSession}
+          variant="outline"
+          className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+          disabled={!allTranscript && !minutes}
+        >
+          <CopyPlusIcon className="w-4 h-4 mr-2" />
+          新しい会議
+        </Button>
         {isRecording ? (
           <Button
             onClick={stopRecording}
@@ -719,16 +729,6 @@ export default function TranscriptionApp() {
             議事録をダウンロード
           </Button>
         )}
-
-        <Button
-          onClick={clearCurrentSession}
-          variant="outline"
-          className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
-          disabled={!allTranscript && !minutes}
-        >
-          <TrashIcon className="w-4 h-4 mr-2" />
-          クリア
-        </Button>
       </div>
       <div className="my-2">
         {immediate && <p className="text-slate-500">リアルタイム文字起こし</p>}
