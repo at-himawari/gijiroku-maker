@@ -15,6 +15,7 @@ import {
   TrashIcon,
   CopyPlusIcon,
   LoaderCircleIcon,
+  XIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -84,6 +85,7 @@ export default function TranscriptionApp() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const { toast } = useToast();
   const { logout, token, user } = useAuth();
 
@@ -94,6 +96,49 @@ export default function TranscriptionApp() {
     loading: profileLoading,
     error: profileError,
   } = useUserProfile();
+  const historyListContent =
+    history.length === 0 ? (
+      <p className="text-gray-500 text-sm text-center py-10 md:py-4">
+        履歴はありません。
+      </p>
+    ) : (
+      <div className="space-y-3">
+        {history.map((item) => (
+          <div
+            key={item.id}
+            className="flex flex-col md:flex-row md:items-center justify-between p-4 border rounded-lg bg-white md:bg-gray-50 shadow-sm hover:border-gray-300 transition-colors"
+          >
+            <div className="mb-4 md:mb-0 md:mr-4 flex-1">
+              <p className="font-semibold text-sm text-gray-700">{item.date}</p>
+              <p className="text-xs text-gray-500 mt-1 line-clamp-2 md:w-96">
+                {item.transcript || "文字起こしデータなし"}
+              </p>
+            </div>
+            <div className="flex space-x-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  loadFromHistory(item);
+                  setIsHistoryModalOpen(false); // スマホ用：復元時にモーダルを閉じる
+                }}
+                className="bg-white"
+              >
+                復元して表示
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-red-500 hover:text-red-700 hover:bg-red-50 border-red-100"
+                onClick={() => deleteHistoryItem(item.id)}
+              >
+                <TrashIcon className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
 
   const updateHistory = useCallback(
     (sessionId: string, transcript: string, mins: string) => {
@@ -687,6 +732,14 @@ export default function TranscriptionApp() {
               <CopyPlusIcon className="w-4 h-4 mr-2" />
               新しい会議
             </Button>
+            <Button
+              onClick={() => setIsHistoryModalOpen(true)}
+              variant="outline"
+              className="md:hidden border-gray-200 text-gray-700 hover:bg-gray-50"
+            >
+              <HistoryIcon className="w-4 h-4 mr-2" />
+              履歴
+            </Button>
             {isRecording ? (
               <Button
                 onClick={stopRecording}
@@ -757,51 +810,38 @@ export default function TranscriptionApp() {
           />
         </div>
       </div>
-      <div className="mt-12 border-t pt-6">
+      <div className="hidden md:block mt-12 border-t pt-6">
         <h2 className="text-xl font-semibold mb-4 flex items-center text-gray-800">
           <HistoryIcon className="w-5 h-5 mr-2" />
           過去の録音履歴
         </h2>
-        {history.length === 0 ? (
-          <p className="text-gray-500 text-sm">履歴はありません。</p>
-        ) : (
-          <div className="space-y-3">
-            {history.map((item) => (
-              <div
-                key={item.id}
-                className="flex flex-col md:flex-row md:items-center justify-between p-4 border rounded-lg bg-gray-50 shadow-sm"
-              >
-                <div className="mb-3 md:mb-0">
-                  <p className="font-semibold text-sm text-gray-700">
-                    {item.date}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1 line-clamp-2 md:w-96">
-                    {item.transcript || "文字起こしデータなし"}
-                  </p>
-                </div>
-                <div className="flex space-x-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => loadFromHistory(item)}
-                    className="bg-white"
-                  >
-                    復元して表示
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                    onClick={() => deleteHistoryItem(item.id)}
-                  >
-                    <TrashIcon className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        {historyListContent}
       </div>
+
+      {/* モバイル用の履歴モーダル */}
+      {isHistoryModalOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-lg shadow-xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between p-4 border-b bg-gray-50">
+              <h2 className="text-xl font-semibold flex items-center text-gray-800">
+                <HistoryIcon className="w-5 h-5 mr-2" />
+                過去の録音履歴
+              </h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsHistoryModalOpen(false)}
+                className="hover:bg-gray-200"
+              >
+                <XIcon className="w-5 h-5" />
+              </Button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              {historyListContent}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
