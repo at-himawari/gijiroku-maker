@@ -639,99 +639,102 @@ export default function TranscriptionApp() {
           インスタンスを起動中。しばらくお待ちください...
         </div>
       ) : profile ? (
-        <div className="flex items-center bg-gray-100 rounded-lg px-3 py-3 my-2 text-sm space-x-3">
-          {/* 利用回数の代わりに残り時間を表示（または併記） */}
-          <div className="flex items-center text-gray-700">
-            <ClockIcon className="w-4 h-4 mr-1 text-orange-500" />
-            <span className="mr-1">
-              残り時間: {formatSeconds(balance ?? 0)}
-            </span>
-            {/* 更新ボタン */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 rounded-full hover:bg-gray-200 text-gray-500 ml-1"
-              onClick={fetchProfile} // プロフィールを再取得する関数を呼ぶ
-              title="残高を更新"
-              disabled={profileLoading} // 読み込み中は無効化
-            >
-              <RefreshCwIcon
-                className={`h-3 w-3 ${profileLoading ? "animate-spin" : ""}`}
-              />
-            </Button>
-            {/* 購入ボタン */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 rounded-full bg-blue-100 hover:bg-blue-200 text-blue-600 ml-1"
-              onClick={handleBuyCredits}
-              title="時間を追加購入（30分 500円）"
-            >
-              <PlusIcon className="h-3 w-3" />
-            </Button>
+        <>
+          <div className="flex items-center bg-gray-100 rounded-lg px-3 py-3 my-2 text-sm space-x-3">
+            {/* 利用回数の代わりに残り時間を表示（または併記） */}
+            <div className="flex items-center text-gray-700">
+              <ClockIcon className="w-4 h-4 mr-1 text-orange-500" />
+              <span className="mr-1">
+                残り時間: {formatSeconds(balance ?? 0)}
+              </span>
+              {/* 更新ボタン */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 rounded-full hover:bg-gray-200 text-gray-500 ml-1"
+                onClick={fetchProfile} // プロフィールを再取得する関数を呼ぶ
+                title="残高を更新"
+                disabled={profileLoading} // 読み込み中は無効化
+              >
+                <RefreshCwIcon
+                  className={`h-3 w-3 ${profileLoading ? "animate-spin" : ""}`}
+                />
+              </Button>
+              {/* 購入ボタン */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 rounded-full bg-blue-100 hover:bg-blue-200 text-blue-600 ml-1"
+                onClick={handleBuyCredits}
+                title="時間を追加購入（30分 500円）"
+              >
+                <PlusIcon className="h-3 w-3" />
+              </Button>
+            </div>
+            <div className="h-4 w-px bg-gray-300"></div>
+            <div className="flex items-center text-gray-700">
+              <RefreshCwIcon className="w-4 h-4 mr-1 text-green-500" />
+              <span>利用回数: {profile.usage_count}回</span>
+            </div>
           </div>
-          <div className="h-4 w-px bg-gray-300"></div>
-          <div className="flex items-center text-gray-700">
-            <RefreshCwIcon className="w-4 h-4 mr-1 text-green-500" />
-            <span>利用回数: {profile.usage_count}回</span>
+          <div className="mb-4 flex flex-wrap gap-3">
+            <Button
+              onClick={clearCurrentSession}
+              variant="outline"
+              className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+              disabled={!allTranscript && !minutes}
+            >
+              <CopyPlusIcon className="w-4 h-4 mr-2" />
+              新しい会議
+            </Button>
+            {isRecording ? (
+              <Button
+                onClick={stopRecording}
+                className="bg-red-500 hover:bg-red-600 text-white"
+              >
+                <SquareIcon className="w-4 h-4 mr-2" />
+                停止
+              </Button>
+            ) : (
+              <Button
+                onClick={startRecording}
+                className="bg-green-500 hover:bg-green-600 text-white"
+                disabled={connectionStatus !== "connected"}
+              >
+                <MicIcon className="w-4 h-4 mr-2" />
+                録音開始
+              </Button>
+            )}
+            <Button
+              onClick={generateMinutes}
+              className="bg-blue-500 hover:bg-blue-600 text-white"
+              disabled={!allTranscript || isGenerating}
+            >
+              {isGenerating ? (
+                <>
+                  <RefreshCwIcon className="w-4 h-4 mr-2 animate-spin" />
+                  生成中...
+                </>
+              ) : (
+                <>
+                  <RefreshCwIcon className="w-4 h-4 mr-2" />
+                  議事録生成
+                </>
+              )}
+            </Button>
+            {minutes && (
+              <Button
+                onClick={downloadMinutes}
+                className="bg-purple-500 hover:bg-purple-600 text-white"
+              >
+                <DownloadIcon className="w-4 h-4 mr-2" />
+                議事録をダウンロード
+              </Button>
+            )}
           </div>
-        </div>
+        </>
       ) : null}
-      <div className="mb-4 flex flex-wrap gap-3">
-        <Button
-          onClick={clearCurrentSession}
-          variant="outline"
-          className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
-          disabled={!allTranscript && !minutes}
-        >
-          <CopyPlusIcon className="w-4 h-4 mr-2" />
-          新しい会議
-        </Button>
-        {isRecording ? (
-          <Button
-            onClick={stopRecording}
-            className="bg-red-500 hover:bg-red-600 text-white"
-          >
-            <SquareIcon className="w-4 h-4 mr-2" />
-            停止
-          </Button>
-        ) : (
-          <Button
-            onClick={startRecording}
-            className="bg-green-500 hover:bg-green-600 text-white"
-            disabled={connectionStatus !== "connected"}
-          >
-            <MicIcon className="w-4 h-4 mr-2" />
-            録音開始
-          </Button>
-        )}
-        <Button
-          onClick={generateMinutes}
-          className="bg-blue-500 hover:bg-blue-600 text-white"
-          disabled={!allTranscript || isGenerating}
-        >
-          {isGenerating ? (
-            <>
-              <RefreshCwIcon className="w-4 h-4 mr-2 animate-spin" />
-              生成中...
-            </>
-          ) : (
-            <>
-              <RefreshCwIcon className="w-4 h-4 mr-2" />
-              議事録生成
-            </>
-          )}
-        </Button>
-        {minutes && (
-          <Button
-            onClick={downloadMinutes}
-            className="bg-purple-500 hover:bg-purple-600 text-white"
-          >
-            <DownloadIcon className="w-4 h-4 mr-2" />
-            議事録をダウンロード
-          </Button>
-        )}
-      </div>
+
       <div className="my-2">
         {immediate && <p className="text-slate-500">リアルタイム文字起こし</p>}
         <h2 className="text-2xl">{immediate}</h2>
