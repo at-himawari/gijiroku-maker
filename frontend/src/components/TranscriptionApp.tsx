@@ -678,15 +678,6 @@ export default function TranscriptionApp() {
         </div>
       ) : null}
       <div className="mb-4 space-x-2">
-        <Button
-          onClick={clearCurrentSession}
-          variant="outline"
-          className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
-          disabled={!allTranscript && !minutes}
-        >
-          <CopyPlusIcon className="w-4 h-4 mr-2" />
-          新しい会議
-        </Button>
         {isRecording ? (
           <Button
             onClick={stopRecording}
@@ -759,6 +750,15 @@ export default function TranscriptionApp() {
           <HistoryIcon className="w-5 h-5 mr-2" />
           過去の録音履歴
         </h2>
+        <Button
+          onClick={clearCurrentSession}
+          variant="outline"
+          className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+          disabled={!allTranscript && !minutes}
+        >
+          <CopyPlusIcon className="w-4 h-4 mr-2" />
+          新しい会議
+        </Button>
         {history.length === 0 ? (
           <p className="text-gray-500 text-sm">履歴はありません。</p>
         ) : (
