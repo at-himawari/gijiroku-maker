@@ -740,6 +740,8 @@ export default function TranscriptionApp() {
               <HistoryIcon className="w-4 h-4 mr-2" />
               履歴
             </Button>
+          </div>
+          <div className="mb-4 flex flex-wrap gap-3">
             {isRecording ? (
               <Button
                 onClick={stopRecording}
