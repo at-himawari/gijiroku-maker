@@ -9,13 +9,15 @@ const favicon = "/logo.png";
 
 export const metadata: Metadata = {
   title: "議事録メーカー",
-  description: "議事録の作成が苦手なあなた！文字起こしを行い、要約を簡単に行うことができます！",
+  description:
+    "議事録の作成が苦手なあなた！文字起こしを行い、要約を簡単に行うことができます！",
   icons: {
     icon: favicon,
   },
   openGraph: {
     title: "議事録メーカー",
-    description: "議事録の作成が苦手なあなた！文字起こしを行い、要約を簡単に行うことができます！",
+    description:
+      "議事録の作成が苦手なあなた！文字起こしを行い、要約を簡単に行うことができます！",
     images: [
       {
         url: "https://gijiroku-maker.at-himawari.com/logo.png",
@@ -39,6 +41,11 @@ export default function RootLayout({
           {children}
           <Toaster />
         </AuthProvider>
+        <script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6651283997191475"
+          crossOrigin="anonymous"
+        ></script>
       </body>
     </html>
   );
