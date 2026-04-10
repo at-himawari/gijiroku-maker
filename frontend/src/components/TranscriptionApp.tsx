@@ -844,6 +844,20 @@ export default function TranscriptionApp() {
           </div>
         </div>
       )}
+
+      <footer className="mt-10 border-t pt-6 pb-8 text-sm leading-6 text-gray-600 text-center">
+        <p>
+          議事録生成に利用しているGeminiはGoogleの生成AIであり、モデルの学習に利用されることはありません。
+          <a
+            href="https://ai.google.dev/gemini-api/terms?hl=ja&_gl=1*1pv6evp*_up*MQ..*_ga*MjQ2OTk4MTU5LjE3NzU3ODU4NTI.*_ga_P1DBVKWT6V*czE3NzU3ODU4NTIkbzEkZzAkdDE3NzU3ODU4NTIkajYwJGwwJGg0MzY4MDY3Ng.."
+            target="_blank"
+            rel="noopener noreferrer"
+            className="ml-1 text-blue-600 underline underline-offset-2 hover:text-blue-700"
+          >
+            詳しくはこちら
+          </a>
+        </p>
+      </footer>
     </div>
   );
 }
