@@ -3,18 +3,16 @@ import os
 import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.params import Query
 from google import genai
 import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import io
 import wave
-import time
 from datetime import datetime
 from pydantic import BaseModel
-from models import UserCreate, SessionCreate, AuthLogCreate, CognitoRegisterRequest, CognitoLoginRequest, CognitoRefreshTokenRequest, CognitoLogoutRequest, CognitoPasswordResetRequest, CognitoPasswordResetConfirmRequest, CognitoPhoneVerificationRequest, CognitoResendVerificationRequest, UserProfileUpdateRequest, UserPreferencesUpdateRequest
-from google.cloud import speech
-from starlette.websockets import WebSocketState
+from models import CognitoRegisterRequest, CognitoLoginRequest, CognitoRefreshTokenRequest, CognitoLogoutRequest, CognitoPasswordResetRequest, CognitoPasswordResetConfirmRequest, CognitoPhoneVerificationRequest, CognitoResendVerificationRequest, UserProfileUpdateRequest, UserPreferencesUpdateRequest
 from dotenv import load_dotenv
 from database import db_manager
 from auth_service import AuthService
@@ -28,6 +26,8 @@ from security_monitoring_service import security_monitoring_service
 from contextlib import asynccontextmanager
 import stripe
 from models import CheckoutSessionRequest
+import azure.cognitiveservices.speech as speechsdk
+import asyncio
 
 BUFFER_TIME_SECONDS = 30
 
@@ -1082,155 +1082,164 @@ async def cleanup_security_monitoring_cache(auth_context: Dict = Depends(require
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket エンドポイント（キューベース音声処理）"""
+    """WebSocket エンドポイント（Azure AI Speech 統合版）"""
     logger.info(f"=== WebSocket ハンドシェイク開始 ===")
     client_ip = websocket.client.host if websocket.client else None
     
-    # 接続を承認
+    # 接続を承認（既存の manager.connect を使用）
     await manager.connect(websocket)
     
-    # 音声データ用キュー
-    audio_queue = asyncio.Queue()
+    # 既存のユーザーコンテキスト・課金システムをそのまま利用
     user_context = {"user": None, "balance": 0.0, "session_usage": 0.0}
 
-    # 【修正】クライアントをエンドポイント内で初期化
-    async with speech.SpeechAsyncClient() as speech_client:
-        
-        async def request_generator():
-            # Google STT への初期設定リクエスト
-            streaming_config = speech.StreamingRecognitionConfig(
-                config=speech.RecognitionConfig(
-                    encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-                    sample_rate_hertz=16000,
-                    language_code="ja-JP",
-                    enable_automatic_punctuation=True,
-                    # model="default", # モデル指定を削除して自動選択に任せる
-                ),
-                interim_results=True
+    # --- Azure AI Speech の設定 ---
+    speech_key = os.environ.get("AZURE_SPEECH_KEY")
+    service_region = os.environ.get("AZURE_SPEECH_REGION")
+    
+    if not speech_key or not service_region:
+        logger.error("Azure Speechのキーまたはリージョンが設定されていません")
+        await websocket.close(code=1011)
+        return
+
+    # 音声ストリームの設定 (16kHz, 16bit, mono)
+    audio_format = speechsdk.audio.AudioStreamFormat(samples_per_second=16000, bits_per_sample=16, channels=1)
+    push_stream = speechsdk.audio.PushAudioInputStream(stream_format=audio_format)
+    audio_config = speechsdk.audio.AudioConfig(stream=push_stream)
+
+    # Speech Configの設定
+    speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=service_region)
+    speech_config.speech_recognition_language = "ja-JP"
+    
+    # 会話の文字起こし（話者分離機能）の初期化
+    transcriber = speechsdk.transcription.ConversationTranscriber(
+        speech_config=speech_config, 
+        audio_config=audio_config
+    )
+
+    message_queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    # --- Azureからのイベントコールバック ---
+    def recognizing_cb(evt):
+        if evt.result.reason == speechsdk.ResultReason.RecognizingSpeech and evt.result.text:
+            asyncio.run_coroutine_threadsafe(
+                message_queue.put({
+                    "type": "immediate",
+                    "text": evt.result.text
+                }), loop
             )
 
-            logger.info("STT: 設定を送信します")
-            yield speech.StreamingRecognizeRequest(streaming_config=streaming_config)
+    def recognized_cb(evt):
+        if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech and evt.result.text:
+            speaker_id = evt.result.speaker_id
+            if speaker_id and speaker_id != "Unknown":
+                final_text = f"【{speaker_id}】 {evt.result.text}"
+            else:
+                final_text = evt.result.text
 
-            while True:
-                try:
-                    audio_data = await asyncio.wait_for(audio_queue.get(), timeout=1.0)
+            asyncio.run_coroutine_threadsafe(
+                message_queue.put({
+                    "type": "transcription",
+                    "text": final_text
+                }), loop
+            )
 
-                    if audio_data is None: # 終了合図
-                        break
+    # イベントハンドラの登録
+    transcriber.transcribing.connect(recognizing_cb)
+    transcriber.transcribed.connect(recognized_cb)
 
-                    # --- 課金ロジック: 残高チェック ---
-                    # 16kHz, 16bit(2bytes) -> 32000 bytes/sec
-                    chunk_seconds = len(audio_data) / 32000.0
-                    
-                    # バランスが不足している場合は停止
-                    if user_context["balance"] - (user_context["session_usage"] + chunk_seconds) < 0:
-                        logger.warning(f"User {user_context['user'].user_id} run out of balance")
-                        await manager.send_personal_message({
-                            "type": "error", 
-                            "message": "利用可能時間を使い切りました。クレジットを購入してください。"
-                        }, websocket)
-                        await websocket.close(code=4002) # 4002: Insufficient Balance
-                        break
-
-                    user_context["session_usage"] += chunk_seconds
-                    yield speech.StreamingRecognizeRequest(audio_content=audio_data)
-                except asyncio.TimeoutError:
-                    silence_data = b'\x00' * 3200
-                    yield speech.StreamingRecognizeRequest(audio_content=silence_data)
-
-                
-                
-        async def stt_processor():
-            """Google STTからのレスポンスを処理してクライアントに送るタスク"""
-            logger.info("STT: プロセッサ起動")
-            try:
-                while True:
-                    try:
-                        responses = await speech_client.streaming_recognize(requests=request_generator())
-                        
-                        async for response in responses:
-                            if not response.results: continue
-                            
-                            for result in response.results:
-                                if not result.alternatives: continue
-                                transcript = result.alternatives[0].transcript
-                                is_final = result.is_final
-                                
-                                await manager.send_personal_message({
-                                    "type": "transcription" if is_final else "immediate",
-                                    "text": transcript
-                        }, websocket)
-                        break
-                    except Exception as e:
-                        logger.error(f"STTプロセッサエラー: {e}")
-                        # ネットワーク切断や、Google STTの5分間制限で切れた場合は少し待って再接続
-                        await asyncio.sleep(1)
-                        logger.info("STT: ストリームの再接続を試みます...")
-                        continue
-
-            except asyncio.CancelledError:
-                logger.info("STTプロセッサキャンセル")
-            finally:
-                logger.info("STT: プロセッサ終了")
-        # STT処理を別タスクで開始
-        stt_task = asyncio.create_task(stt_processor())
+    # --- タスク：Azureの結果をキューから取り出してフロントエンドに送る ---
+    async def sender_task():
         try:
             while True:
-                message = await websocket.receive()
-                
-                if message["type"] == "websocket.receive":
-                    if "text" in message:
-                        data = json.loads(message["text"])
-                        if data.get("type") == "auth":
-                            token = data.get("token")
-                            auth_result = await auth_middleware.verify_websocket_auth(token, client_ip)
-                            if auth_result['success']:
-                                user = auth_result['user']
-                                user_context["user"] = user
-                                # DBから最新の残高を取得
-                                app_data = await db_manager.get_app_user_data_by_cognito_sub(user.cognito_user_sub)
-                                
-                                if not app_data:
-                                    logger.info(f"WebSocket: Creating initial data for {user.user_id}")
-                                    app_data = await db_manager.create_app_user_data(user.cognito_user_sub)
+                msg = await message_queue.get()
+                await manager.send_personal_message(msg, websocket)
+        except asyncio.CancelledError:
+            pass
 
-                                user_context["balance"] = app_data.get("seconds_balance", 0.0) if app_data else 0.0
-                                
-                                logger.info(f"WebSocket認証成功: {user.user_id}, Balance: {user_context['balance']}s")
-                                
-                                # 残高情報をクライアントに送信
-                                await manager.send_personal_message({
-                                    "type": "balance_info",
-                                    "balance": user_context["balance"]
-                                }, websocket)
-                            else:
-                                await websocket.close(code=4001)
-                                break
-                    elif "bytes" in message:
-                        if user_context["user"]:
-                            await audio_queue.put(message["bytes"])
+    s_task = None
+    is_transcribing = False
+
+    try:
+        while True:
+            message = await websocket.receive()
+            
+            if message["type"] == "websocket.receive":
+                if "text" in message:
+                    data = json.loads(message["text"])
+                    if data.get("type") == "auth":
+                        token = data.get("token")
+                        
+                        # --- 既存のアプリの認証ロジックを復元 ---
+                        auth_result = await auth_middleware.verify_websocket_auth(token, client_ip)
+                        if auth_result['success']:
+                            user = auth_result['user']
+                            user_context["user"] = user
                             
-                elif message["type"] == "websocket.disconnect":
-                    break
+                            # DBから最新の残高を取得
+                            app_data = await db_manager.get_app_user_data_by_cognito_sub(user.cognito_user_sub)
+                            if not app_data:
+                                logger.info(f"WebSocket: Creating initial data for {user.user_id}")
+                                app_data = await db_manager.create_app_user_data(user.cognito_user_sub)
 
-        except WebSocketDisconnect:
-            logger.info("WebSocket切断")
-        finally:
-            await audio_queue.put(None)
-            try:
-                # タイムアウト付きでタスク終了待ち
-                await asyncio.wait_for(stt_task, timeout=1.0)
-            except Exception:
-                stt_task.cancel()
+                            user_context["balance"] = app_data.get("seconds_balance", 0.0) if app_data else 0.0
+                            logger.info(f"WebSocket認証成功: {user.user_id}, Balance: {user_context['balance']}s")
+                            
+                            # 残高情報をクライアントに送信
+                            await manager.send_personal_message({
+                                "type": "balance_info",
+                                "balance": user_context["balance"]
+                            }, websocket)
+
+                            # 認証が成功したらAzureの文字起こしを裏で開始！
+                            transcriber.start_transcribing_async().get()
+                            is_transcribing = True
+                            s_task = asyncio.create_task(sender_task())
+                        else:
+                            await websocket.close(code=4001)
+                            break
+                            
+                elif "bytes" in message:
+                    if user_context["user"]:
+                        # --- 既存のアプリの課金・残高チェックロジックを復元 ---
+                        chunk_seconds = len(message["bytes"]) / 32000.0
+                        if user_context["balance"] - (user_context["session_usage"] + chunk_seconds) < 0:
+                            logger.warning(f"User {user_context['user'].user_id} run out of balance")
+                            await manager.send_personal_message({
+                                "type": "error", 
+                                "message": "利用可能時間を使い切りました。クレジットを購入してください。"
+                            }, websocket)
+                            await websocket.close(code=4002)
+                            break
+                        
+                        user_context["session_usage"] += chunk_seconds
+                        
+                        # 受け取った音声バイナリをAzureのストリームに書き込む
+                        push_stream.write(message["bytes"])
+                        
+            elif message["type"] == "websocket.disconnect":
+                break
+
+    except WebSocketDisconnect:
+        logger.info("WebSocket切断")
+    finally:
+        # マイクが切れたらストリームを閉じる
+        push_stream.close()
+        
+        # 起動していたらAzureの文字起こしを停止
+        if is_transcribing:
+            transcriber.stop_transcribing_async().get()
+        if s_task:
+            s_task.cancel()
+        
+        # --- 最終的な使用量をDBから差し引く（既存ロジック） ---
+        if user_context["user"] and user_context["session_usage"] > 0:
+            used = user_context["session_usage"]
+            await db_manager.deduct_balance(user_context["user"].cognito_user_sub, used)
+            logger.info(f"Session closed. Deducted {used:.2f} seconds.")
             
-            # --- 最終的な使用量をDBから差し引く ---
-            if user_context["user"] and user_context["session_usage"] > 0:
-                used = user_context["session_usage"]
-                await db_manager.deduct_balance(user_context["user"].cognito_user_sub, used)
-                logger.info(f"Session closed. Deducted {used:.2f} seconds.")
-            
-            manager.disconnect(websocket)
+        manager.disconnect(websocket)
+ 
                 
 @app.get("/auth/migration/status")
 async def get_migration_status():
