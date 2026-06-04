@@ -1,0 +1,52 @@
+name: Deploy backend to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend-cloud-run
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: gijiroku-maker-437406
+  REGION: asia-northeast1
+  SERVICE: gijiroku-backend
+  WORKLOAD_IDENTITY_PROVIDER: projects/800070127554/locations/global/workloadIdentityPools/github-actions/providers/github-gijiroku-maker
+  SERVICE_ACCOUNT: gijiroku-maker-github-cd@gijiroku-maker-437406.iam.gserviceaccount.com
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy backend
+        working-directory: backend
+        run: |
+          gcloud run deploy "${SERVICE}" \
+            --source . \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}" \
+            --quiet
