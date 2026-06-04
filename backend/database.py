@@ -2,6 +2,7 @@
 データベース接続とCRUD操作
 """
 import os
+import json
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta

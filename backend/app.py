@@ -1157,6 +1157,25 @@ async def websocket_endpoint(websocket: WebSocket):
         except asyncio.CancelledError:
             pass
 
+    async def sync_session_usage_to_db():
+        """録音で消費した時間をDBへ反映し、最新の残り時間をクライアントへ返す。"""
+        user = user_context["user"]
+        used = user_context["session_usage"]
+        if not user or used <= 0:
+            return
+
+        await db_manager.deduct_balance(user.cognito_user_sub, used)
+        user_context["session_usage"] = 0.0
+
+        app_data = await db_manager.get_app_user_data_by_cognito_sub(user.cognito_user_sub)
+        user_context["balance"] = app_data.get("seconds_balance", 0.0) if app_data else 0.0
+        logger.info(f"Deducted {used:.2f} seconds. Balance: {user_context['balance']:.2f}s")
+
+        await manager.send_personal_message({
+            "type": "balance_info",
+            "balance": user_context["balance"]
+        }, websocket)
+
     s_task = None
     is_transcribing = False
 
@@ -1198,6 +1217,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         else:
                             await websocket.close(code=4001)
                             break
+                    elif data.get("type") == "stop_recording":
+                        await sync_session_usage_to_db()
                             
                 elif "bytes" in message:
                     if user_context["user"]:
@@ -1234,9 +1255,7 @@ async def websocket_endpoint(websocket: WebSocket):
         
         # --- 最終的な使用量をDBから差し引く（既存ロジック） ---
         if user_context["user"] and user_context["session_usage"] > 0:
-            used = user_context["session_usage"]
-            await db_manager.deduct_balance(user_context["user"].cognito_user_sub, used)
-            logger.info(f"Session closed. Deducted {used:.2f} seconds.")
+            await sync_session_usage_to_db()
             
         manager.disconnect(websocket)
  

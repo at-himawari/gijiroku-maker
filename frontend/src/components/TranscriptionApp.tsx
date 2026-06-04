@@ -409,6 +409,9 @@ export default function TranscriptionApp() {
           setImmediate(data.text);
         } else if (data.type === "minutes") {
           setMinutes(data.text);
+        } else if (data.type === "balance_info") {
+          setBalance(data.balance);
+          fetchProfile();
         } else if (data.type === "error") {
           toast({
             title: "エラー",
@@ -454,7 +457,7 @@ export default function TranscriptionApp() {
         }
       }
     };
-  }, [token, toast]);
+  }, [token, toast, fetchProfile]);
 
   useEffect(() => {
     if (token) {
@@ -557,6 +560,9 @@ export default function TranscriptionApp() {
       processorRef.current?.disconnect();
       processorRef.current = null;
       audioContextRef.current.close();
+    }
+    if (globalWebSocket?.readyState === WebSocket.OPEN) {
+      globalWebSocket.send(JSON.stringify({ type: "stop_recording" }));
     }
     setIsRecording(false);
   };
