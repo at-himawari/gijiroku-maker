@@ -23,6 +23,7 @@ import { fetchAuthSession } from "aws-amplify/auth";
 import Image from "next/image";
 import { useUserProfile } from "@/hooks/useUserProfile";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // 追加
+import { trackEvent } from "@/lib/gtag";
 
 const SAMPLE_RATE = 16000;
 const WS_URL = process.env.NEXT_PUBLIC_WS_BASE_URL!;
@@ -119,6 +120,10 @@ export default function TranscriptionApp() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
+                  trackEvent("history_restore", {
+                    transcript_length: item.transcript.length,
+                    minutes_length: item.minutes.length,
+                  });
                   loadFromHistory(item);
                   setIsHistoryModalOpen(false); // スマホ用：復元時にモーダルを閉じる
                 }}
@@ -263,6 +268,10 @@ export default function TranscriptionApp() {
       localStorage.removeItem("current_transcript");
       localStorage.removeItem("current_minutes");
       localStorage.setItem("current_session_id", newId);
+      trackEvent("new_meeting", {
+        had_transcript: Boolean(allTranscript),
+        had_minutes: Boolean(minutes),
+      });
     }
   };
 
@@ -295,11 +304,24 @@ export default function TranscriptionApp() {
       "transcription_history",
       JSON.stringify(updatedHistory),
     );
+    trackEvent("history_delete");
     toast({ title: "履歴を削除しました" });
   };
 
   const handleBuyCredits = async () => {
     if (!token) return;
+    trackEvent("begin_checkout", {
+      currency: "JPY",
+      value: 500,
+      items: [
+        {
+          item_id: "credit_30min",
+          item_name: "30分クレジット",
+          price: 500,
+          quantity: 1,
+        },
+      ],
+    });
     try {
       const response = await fetch(
         `${API_BASE_URL}/payment/create-checkout-session`,
@@ -314,8 +336,14 @@ export default function TranscriptionApp() {
       );
       const data = await response.json();
       if (data.url) {
+        trackEvent("checkout_redirect", {
+          status: "success",
+        });
         window.location.href = data.url;
       } else {
+        trackEvent("checkout_redirect", {
+          status: "missing_url",
+        });
         toast({
           title: "エラー",
           description: "決済ページの取得に失敗しました",
@@ -324,6 +352,9 @@ export default function TranscriptionApp() {
       }
     } catch (e) {
       console.error(e);
+      trackEvent("checkout_redirect", {
+        status: "error",
+      });
       toast({
         title: "エラー",
         description: "通信エラーが発生しました",
@@ -481,6 +512,10 @@ export default function TranscriptionApp() {
   const startRecording = async () => {
     try {
       if (connectionStatus !== "connected") {
+        trackEvent("recording_start_blocked", {
+          reason: "websocket_disconnected",
+          connection_status: connectionStatus,
+        });
         toast({
           title: "接続エラー",
           description: "サーバーに接続されていません。再接続を待ってください。",
@@ -491,6 +526,9 @@ export default function TranscriptionApp() {
 
       // 残高チェック
       if (balance !== null && balance <= 0) {
+        trackEvent("recording_start_blocked", {
+          reason: "insufficient_balance",
+        });
         toast({
           title: "残高不足",
           description:
@@ -539,9 +577,15 @@ export default function TranscriptionApp() {
       processorRef.current.connect(audioContextRef.current.destination);
 
       setIsRecording(true);
+      trackEvent("recording_start", {
+        balance_seconds: balance,
+      });
       URL.revokeObjectURL(workletUrl);
     } catch (error) {
       console.error("Error accessing microphone:", error);
+      trackEvent("recording_start_failed", {
+        reason: "microphone_access",
+      });
       toast({
         title: "エラー",
         description: "マイクへのアクセスに失敗しました。",
@@ -565,11 +609,17 @@ export default function TranscriptionApp() {
       globalWebSocket.send(JSON.stringify({ type: "stop_recording" }));
     }
     setIsRecording(false);
+    trackEvent("recording_stop", {
+      transcript_length: allTranscript.length,
+    });
   };
 
   const generateMinutes = async () => {
     if (!token) return;
     setIsGenerating(true);
+    trackEvent("generate_minutes_start", {
+      transcript_length: allTranscript.length,
+    });
     try {
       const response = await fetch(`${API_BASE_URL}/generate_minutes`, {
         method: "POST",
@@ -585,6 +635,10 @@ export default function TranscriptionApp() {
       if (!response.ok) throw new Error("Minutes generation failed");
       const data = await response.json();
       setMinutes(data.minutes);
+      trackEvent("generate_minutes_success", {
+        transcript_length: allTranscript.length,
+        minutes_length: data.minutes?.length ?? 0,
+      });
 
       // 議事録生成成功時に使用回数を更新するため再取得
       await fetchProfile();
@@ -592,6 +646,9 @@ export default function TranscriptionApp() {
       toast({ title: "成功", description: "議事録が生成されました。" });
     } catch (error) {
       console.error("Error generating minutes:", error);
+      trackEvent("generate_minutes_failed", {
+        transcript_length: allTranscript.length,
+      });
       toast({
         title: "エラー",
         description: "議事録の生成に失敗しました。",
@@ -603,6 +660,9 @@ export default function TranscriptionApp() {
   };
 
   const downloadMinutes = () => {
+    trackEvent("download_minutes", {
+      minutes_length: minutes.length,
+    });
     const element = document.createElement("a");
     const file = new Blob([minutes], { type: "text/plain" });
     element.href = URL.createObjectURL(file);
@@ -669,6 +729,7 @@ export default function TranscriptionApp() {
             )}
             <Button
               onClick={async () => {
+                trackEvent("logout");
                 isExplicitlyClosing = true;
                 if (globalWebSocket) globalWebSocket.close();
                 globalWebSocket = null;

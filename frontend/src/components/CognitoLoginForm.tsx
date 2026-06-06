@@ -12,6 +12,7 @@ import { useFormPersistence } from "@/hooks/useFormPersistence";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { useLoadingState } from "@/hooks/useLoadingState";
 import { ErrorMessageManager } from "@/lib/errorMessages";
+import { trackEvent } from "@/lib/gtag";
 
 interface CognitoLoginFormProps {
   onSuccess?: () => void;
@@ -120,11 +121,17 @@ export const CognitoLoginForm: React.FC<CognitoLoginFormProps> = ({
     }
 
     startLoading(ErrorMessageManager.getLoadingMessage("login"));
+    trackEvent("login_start", {
+      method: "cognito",
+    });
 
     try {
       const result = await cognitoSignIn(formData.email, formData.password);
 
       if (result.success) {
+        trackEvent("login", {
+          method: "cognito",
+        });
         setSuccess(ErrorMessageManager.getSuccessMessage("login"));
         handleSubmitSuccess();
         clearValidation();
@@ -134,12 +141,18 @@ export const CognitoLoginForm: React.FC<CognitoLoginFormProps> = ({
           onSuccess?.();
         }, 1000);
       } else {
+        trackEvent("login_failed", {
+          method: "cognito",
+        });
         setError(
           result.message || ErrorMessageManager.getCognitoErrorMessage(null)
         );
       }
     } catch (error: any) {
       console.error("Login error:", error);
+      trackEvent("login_failed", {
+        method: "cognito",
+      });
       setError(ErrorMessageManager.getCognitoErrorMessage(error));
     } finally {
       stopLoading();

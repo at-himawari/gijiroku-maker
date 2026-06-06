@@ -19,6 +19,7 @@ import { useFormPersistence } from "@/hooks/useFormPersistence";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { useLoadingState } from "@/hooks/useLoadingState";
 import { ErrorMessageManager } from "@/lib/errorMessages";
+import { trackEvent } from "@/lib/gtag";
 
 interface CognitoRegisterFormProps {
   onSuccess?: () => void;
@@ -233,6 +234,9 @@ export const CognitoRegisterForm: React.FC<CognitoRegisterFormProps> = ({
     }
 
     startLoading(ErrorMessageManager.getLoadingMessage("register"));
+    trackEvent("sign_up_start", {
+      method: "cognito",
+    });
 
     try {
       // 電話番号を国際形式に変換
@@ -250,11 +254,17 @@ export const CognitoRegisterForm: React.FC<CognitoRegisterFormProps> = ({
 
       if (result.success) {
         if (result.requiresConfirmation) {
+          trackEvent("sign_up_code_sent", {
+            method: "cognito",
+          });
           setSuccess(
             result.message || ErrorMessageManager.getSuccessMessage("register")
           );
           setStep("confirm");
         } else {
+          trackEvent("sign_up", {
+            method: "cognito",
+          });
           setSuccess(ErrorMessageManager.getSuccessMessage("register"));
           handleSubmitSuccess();
           clearValidation();
@@ -263,12 +273,18 @@ export const CognitoRegisterForm: React.FC<CognitoRegisterFormProps> = ({
           }, 1000);
         }
       } else {
+        trackEvent("sign_up_failed", {
+          method: "cognito",
+        });
         setError(
           result.message || ErrorMessageManager.getCognitoErrorMessage(null)
         );
       }
     } catch (error: any) {
       console.error("Registration error:", error);
+      trackEvent("sign_up_failed", {
+        method: "cognito",
+      });
       setError(ErrorMessageManager.getCognitoErrorMessage(error));
     } finally {
       stopLoading();
@@ -294,6 +310,9 @@ export const CognitoRegisterForm: React.FC<CognitoRegisterFormProps> = ({
       );
 
       if (result.success) {
+        trackEvent("sign_up", {
+          method: "cognito",
+        });
         setSuccess(
           result.message || ErrorMessageManager.getSuccessMessage("confirm")
         );
@@ -303,12 +322,18 @@ export const CognitoRegisterForm: React.FC<CognitoRegisterFormProps> = ({
           onSuccess?.();
         }, 1000);
       } else {
+        trackEvent("sign_up_confirm_failed", {
+          method: "cognito",
+        });
         setError(
           result.message || ErrorMessageManager.getCognitoErrorMessage(null)
         );
       }
     } catch (error: any) {
       console.error("Confirmation error:", error);
+      trackEvent("sign_up_confirm_failed", {
+        method: "cognito",
+      });
       setError(ErrorMessageManager.getCognitoErrorMessage(error));
     } finally {
       stopLoading();
@@ -324,6 +349,9 @@ export const CognitoRegisterForm: React.FC<CognitoRegisterFormProps> = ({
     try {
       const result = await cognitoResendSignUpCode(formData.email);
       if (result.success) {
+        trackEvent("sign_up_code_resend", {
+          method: "cognito",
+        });
         setSuccess(
           result.message || ErrorMessageManager.getSuccessMessage("resendCode")
         );
