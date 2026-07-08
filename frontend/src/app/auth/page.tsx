@@ -71,7 +71,7 @@ function AuthPageContent() {
         </div>
       </div>
       <footer className="mt-auto pt-8 text-center text-sm text-gray-500">
-        ©︎2026 Himawari Project
+        &copy; 2026 Himawari Project All rights reserved.
       </footer>
     </div>
   );
