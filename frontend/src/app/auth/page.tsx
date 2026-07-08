@@ -18,56 +18,61 @@ function AuthPageContent() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <div className="flex justify-center">
-            <Image
-              className="h-12 w-auto"
-              src="/logo.png"
-              alt="議事録メーカー"
-              width={48}
-              height={48}
-            />
-          </div>
-          <h1 className="mt-6 text-3xl font-extrabold text-gray-900">
-            議事録メーカー
-          </h1>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="flex mb-6 bg-gray-100 rounded-lg p-1">
-            <Button
-              variant={mode === "login" ? "default" : "ghost"}
-              onClick={() => setMode("login")}
-              className="flex-1"
-              data-testid="login-tab"
-            >
-              ログイン
-            </Button>
-            <Button
-              variant={mode === "register" ? "default" : "ghost"}
-              onClick={() => setMode("register")}
-              className="flex-1"
-              data-testid="register-tab"
-            >
-              新規登録
-            </Button>
+    <div className="flex min-h-screen flex-col bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+      <div className="flex flex-1 items-center justify-center">
+        <div className="max-w-md w-full space-y-8">
+          <div className="text-center">
+            <div className="flex justify-center">
+              <Image
+                className="h-12 w-auto"
+                src="/logo.png"
+                alt="議事録メーカー"
+                width={48}
+                height={48}
+              />
+            </div>
+            <h1 className="mt-6 text-3xl font-extrabold text-gray-900">
+              議事録メーカー
+            </h1>
           </div>
 
-          {mode === "login" ? (
-            <CognitoLoginForm
-              onSuccess={handleSuccess}
-              onSwitchToRegister={() => setMode("register")}
-            />
-          ) : (
-            <CognitoRegisterForm
-              onSuccess={handleSuccess}
-              onSwitchToLogin={() => setMode("login")}
-            />
-          )}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex mb-6 bg-gray-100 rounded-lg p-1">
+              <Button
+                variant={mode === "login" ? "default" : "ghost"}
+                onClick={() => setMode("login")}
+                className="flex-1"
+                data-testid="login-tab"
+              >
+                ログイン
+              </Button>
+              <Button
+                variant={mode === "register" ? "default" : "ghost"}
+                onClick={() => setMode("register")}
+                className="flex-1"
+                data-testid="register-tab"
+              >
+                新規登録
+              </Button>
+            </div>
+
+            {mode === "login" ? (
+              <CognitoLoginForm
+                onSuccess={handleSuccess}
+                onSwitchToRegister={() => setMode("register")}
+              />
+            ) : (
+              <CognitoRegisterForm
+                onSuccess={handleSuccess}
+                onSwitchToLogin={() => setMode("login")}
+              />
+            )}
+          </div>
         </div>
       </div>
+      <footer className="mt-auto pt-8 text-center text-sm text-gray-500">
+        ©︎2026 Himawari Project
+      </footer>
     </div>
   );
 }
