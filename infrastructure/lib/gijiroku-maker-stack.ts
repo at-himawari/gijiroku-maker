@@ -122,10 +122,10 @@ export class GijirokuMakerStack extends cdk.Stack {
           ],
           callbackUrls: [
             "http://localhost:3001",
-            "https://gijiroku-maker.at-himawari.com", // Cloudflare Pages URL（後で更新）
+            "https://gijiroku-maker.at-himawari.com", // Cloudflare Workers custom domain
           ],
           logoutUrls: [
-            "https://gijiroku-maker.at-himawari.com/login", // Cloudflare Pages URL（後で更新）
+            "https://gijiroku-maker.at-himawari.com/login", // Cloudflare Workers custom domain
           ],
         },
 
